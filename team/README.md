@@ -77,7 +77,7 @@ Most of the grade is in the **paper, the measurements and the demo**. Pretty cod
 6. **No AI attribution** in commits or pull requests (no "Co-Authored-By: Claude", no "Generated with ChatGPT"). A git hook removes these automatically inside the dev container, but don't add them.
 7. **Run `make` and `make test` before you push.** Both must succeed.
 8. **Small pull requests.** One feature or fix at a time. Small is easy to review; huge gets sent back.
-9. **Write in the work log.** At the end of each session, add 3 or 4 sentences to `docs/log.md`: what you built and what you noticed. This becomes the paper, so it saves you work later.
+9. **Write in the work log.** At the end of each session, add 3 or 4 sentences to your own log file, `docs/log/<your name>.md`: what you built and what you noticed. This becomes the paper, so it saves you work later.
 
 The exact message format is in `docs/PROTOCOL.md`. You don't need to read it all; your page tells you which sections matter for you.
 

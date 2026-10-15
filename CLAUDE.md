@@ -255,7 +255,7 @@ Not done or not confirmed (check the repo before assuming):
 - Whether the GitHub repo exists and the files above are committed at those paths.
 - Teammates invited, Carvin's GitHub account created.
 - The skeleton (headers, stubs, server/client command loop, `make test`). A previous session started it but never delivered it.
-- `README.md`, `docs/PROTOCOL.md`, `docs/SETUP.md`, `docs/log.md`, `AGENTS.md`, `ai/` files, `.github/CODEOWNERS`, `.github/copilot-instructions.md`, `.claude/settings.json`, the commit-msg hook.
+- `README.md`, `docs/PROTOCOL.md`, `docs/SETUP.md`, `docs/log/`, `AGENTS.md`, `ai/` files, `.github/CODEOWNERS`, `.github/copilot-instructions.md`, `.claude/settings.json`, the commit-msg hook.
 - Docker build and Codespaces launch tested end to end.
 
 ## 12. Your task list, in order
@@ -289,7 +289,7 @@ Stop after each step, summarise in plain words, and let Shalom confirm before mo
 Must-have: ML-KEM handshake, AES-encrypted upload, signed upload and verify, sensor simulator, three measurements (transfer time, message size, signature check).
 Stretch, cut in this order if short on time: share links, version history, resume after drop, front end.
 
-Habit: at the end of every work session, each person writes 3 to 4 sentences on what they built and found, in `docs/log.md`. These become the paper.
+Habit: at the end of every work session, each person writes 3 to 4 sentences on what they built and found, in their own file in `docs/log/` (`shalom.md`, `chris.md`, `carvin.md`). One file each, so log entries never cause merge conflicts. These become the paper.
 
 ## 14. Risks
 

@@ -20,7 +20,7 @@ Skeleton stage. The framing and timing code works and is tested. The secure pipe
 
 ## Build and run
 
-Everything runs inside the dev container (`.devcontainer/`): Ubuntu 24.04 with liboqs 0.16.0 and OpenSSL. Open the repo in VS Code with the Dev Containers extension, or in GitHub Codespaces. Setup steps for each teammate: `docs/SETUP.md` (coming).
+Everything runs inside the dev container (`.devcontainer/`): Ubuntu 24.04 with liboqs 0.16.0 and OpenSSL. Open the repo in VS Code with the Dev Containers extension, or in GitHub Codespaces. Setup steps for teammates: [docs/SETUP.md](docs/SETUP.md).
 
 ```sh
 make            # build all programs into build/

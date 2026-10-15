@@ -35,4 +35,4 @@ Timings on shared cloud machines are noisy. Repeat each measurement many times (
 
 ## End of each work session
 
-Add 3 to 4 sentences to `docs/log.md`: what you built and what you found. These become the final paper.
+Add 3 to 4 sentences to your own file in `docs/log/` (for example `docs/log/chris.md`): what you built and what you found. These become the final paper.
