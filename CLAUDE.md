@@ -65,7 +65,7 @@ Research questions the measurements answer:
 
 - Base image `mcr.microsoft.com/devcontainers/base:ubuntu-24.04` (if that tag fails to pull, try `noble`).
 - The Dockerfile installs build-essential, cmake, ninja-build, libssl-dev, git, curl, gdb and valgrind. It then downloads the liboqs 0.16.0 release tarball and builds it with CMake/Ninja as a static library (`BUILD_SHARED_LIBS=OFF`), library only, with `OQS_MINIMAL_BUILD="KEM_ml_kem_768;SIG_ml_dsa_65"`, installed to `/usr/local`. Only those two algorithms exist in this build; adding any other algorithm means editing that line and rebuilding the container.
-- Python is not explicitly installed. Before writing chart scripts, check `python3` and `matplotlib` in the container and add them to the Dockerfile if missing.
+- `python3` and `python3-matplotlib` were added to the Dockerfile on Oct 15 for the chart scripts. They take effect after a container rebuild.
 - `devcontainer.json` points at that Dockerfile, adds the `ms-vscode.cpptools` and `ms-vscode.makefile-tools` extensions, and runs as user `vscode`.
 - `Makefile` currently has only `all`, `demo` and `clean`; it links `-loqs -lcrypto -lpthread`. `.gitignore` currently ignores only `build/`, `*.key` and `*.o`; extend it (keys folders, `*.pem`, generated data, server storage).
 - Codespaces allowance: Shalom's verified student account gets 180 core-hours/month; free accounts get 120 (about 60 hours on a 2-core machine). Each person's usage bills to whoever creates the codespace. Codespaces needs internet, so demo-day fallback is the same container run locally with Docker.
@@ -93,7 +93,9 @@ tampered message verifies: NO (should be NO)
 
 The 1.4 ms first key pair is mostly start-up cost; single runs are not results.
 
-Not verified: Docker image build and Codespaces themselves, and the Mac path. Treat those as untested until someone runs them.
+Verified Oct 15: the Docker image builds and `make demo` runs in the local dev container on Shalom's Windows machine (Docker Desktop, WSL2).
+
+Not verified: Codespaces, and the Mac path. Treat those as untested until someone runs them.
 
 ## 6. Repo layout
 
@@ -151,7 +153,7 @@ After that every message is type `0x10 SECURE`, whose payload is AES-GCM ciphert
 
 Known limitation for the paper: v1 does not authenticate the server, so a man-in-the-middle could attack the handshake. A signed server key can be added later as a new message type without changing the others.
 
-Open details to settle in `docs/PROTOCOL.md` (propose, then ask Shalom): exact byte layout of the signed record, HKDF salt and info strings, maximum frame size, error codes inside ERROR.
+Open details (signed record layout, HKDF salt and info strings, maximum frame size, error codes) were settled with Shalom on Oct 15. See `docs/PROTOCOL.md`, which is now the authority on byte layouts.
 
 ## 8. Shared function contract
 

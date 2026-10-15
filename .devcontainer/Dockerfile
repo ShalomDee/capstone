@@ -1,9 +1,11 @@
 # Same Ubuntu 24.04 everyone uses, with the C tools and liboqs already installed.
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
-# C compiler, build tools, OpenSSL headers, and two debugging helpers (gdb, valgrind)
+# C compiler, build tools, OpenSSL headers, two debugging helpers (gdb, valgrind),
+# and Python with matplotlib for the chart scripts
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build libssl-dev git curl gdb valgrind \
+        python3 python3-matplotlib \
     && rm -rf /var/lib/apt/lists/*
 
 # liboqs, pinned to one release so all three of us build identical code.
