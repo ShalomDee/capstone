@@ -1,0 +1,10 @@
+{
+  "name": "QuantumDrive (C + liboqs)",
+  "build": { "dockerfile": "Dockerfile" },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-vscode.cpptools", "ms-vscode.makefile-tools"]
+    }
+  },
+  "remoteUser": "vscode"
+}
