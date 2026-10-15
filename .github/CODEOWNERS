@@ -1,0 +1,16 @@
+# Who must review changes to each part of the repo.
+# The last matching line wins, so Shalom is listed on every line: she reviews everything.
+
+*                     @ShalomDee
+
+# Carvin: the secure pipe
+/common/securenet.c   @ShalomDee @cyoung18
+
+# Chris: identity and command handlers
+/common/identity.c    @ShalomDee @ChristopherLS
+/server/handlers.c    @ShalomDee @ChristopherLS
+/client/commands.c    @ShalomDee @ChristopherLS
+
+# Shared contract: headers and protocol change only with Shalom's approval
+/common/*.h           @ShalomDee
+/docs/PROTOCOL.md     @ShalomDee

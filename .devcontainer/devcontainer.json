@@ -6,5 +6,6 @@
       "extensions": ["ms-vscode.cpptools", "ms-vscode.makefile-tools"]
     }
   },
-  "remoteUser": "vscode"
+  "remoteUser": "vscode",
+  "postCreateCommand": "git config core.hooksPath scripts/hooks"
 }

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Removes AI attribution lines from commit messages (CLAUDE.md section 9).
+# Deletes "Co-Authored-By:" lines and "Generated with/by" lines that name an AI tool.
+# Human co-authors are kept.
+# Enable once per clone with:  git config core.hooksPath scripts/hooks
+
+msg_file="$1"
+ai='(claude|anthropic|copilot|chatgpt|openai|codex|gemini|cursor|aider|windsurf|codeium|tabnine|cody|devin|gpt)'
+tmp="${msg_file}.tmp"
+
+grep -i -v -E "^[[:space:]]*co-authored-by:.*${ai}|generated (with|by).*${ai}" "$msg_file" |
+  awk '{ line[NR] = $0 } END { n = NR; while (n > 0 && line[n] ~ /^[[:space:]]*$/) n--; for (i = 1; i <= n; i++) print line[i] }' > "$tmp"
+mv "$tmp" "$msg_file"

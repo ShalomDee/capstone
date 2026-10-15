@@ -1,5 +1,7 @@
 # QuantumDrive: project brief for Claude Code
 
+**If the person you are working with is not Shalom** (for example Chris or Carvin), read `AGENTS.md` and follow it instead: ask which teammate they are and load their file in `ai/`. The rest of this file is Shalom's brief, and its task list is hers.
+
 Read this whole file before doing anything in this repo. It records every decision made so far, why it was made, what is finished, and what is left. If something here conflicts with what Shalom tells you in chat, what she says in chat wins.
 
 ## 1. Who you are working with
