@@ -109,12 +109,13 @@ quantumdrive/
   .claude/           settings.json (attribution off)
   ai/                rules-common.md, role-carvin.md, role-chris.md, role-shalom.md, glossary.md
   docs/              PROTOCOL.md, diagram, setup guides, reports
-  common/            shared code: framing, securenet (Carvin), identity (Chris), bench (Shalom)
+  common/            shared code: protocol constants, framing, securenet (Carvin), identity (Chris), bench (Shalom)
   server/            server program (skeleton by Shalom, handlers by Chris)
   client/            client program (skeleton by Shalom, handlers by Chris)
   sensor/            sensor simulator (Shalom)
   bench/             measurement programs and Python chart scripts (Shalom)
   demo/              pqc_demo.c toolchain check
+  tests/             make test (Shalom)
   scripts/           helper scripts
   Makefile
   .gitignore         build output, keys, local data
@@ -182,7 +183,9 @@ uint64_t bench_now_ns(void);
 void     bench_log(const char *label, uint64_t value, const char *unit);
 ```
 
-`sec_session` is defined in `securenet.h` and holds the socket, both direction keys, and both counters.
+`sec_session` is defined in `securenet.h` and holds the socket, both direction keys, and both counters. Its fields are named send/recv from each program's own point of view, so the same code works on client and server.
+
+`common/protocol.h` (Shalom, approved Oct 15) holds every message code, size and return code from `docs/PROTOCOL.md`. Use its names instead of typing numbers. It has the same change rule as the other headers.
 
 ## 9. Git workflow
 
