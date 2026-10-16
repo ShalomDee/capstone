@@ -27,10 +27,11 @@ Read this whole file before doing anything in this repo. It records every decisi
 |---|---|---|---|
 | Carvin Young | 7: the secure pipe | `common/securenet.*` | TCP connection, ML-KEM handshake, AES-GCM encryption, chunked transfer |
 | Christopher (Chris) Stills | 8: proof of who sent what | `common/identity.*`, command handlers in `server/` and `client/` | Key pairs, ML-DSA signing and verifying, register, list, download |
-| Shalom Donga | 5: farm devices | `sensor/`, `bench/`, `docs/`, the skeleton, integration | Sensor simulator, measurements, repo setup, merging |
+| Shalom Donga | 5: farm devices | `sensor/`, `bench/`, `docs/`, the skeleton, integration | Sensor simulator, topic 5 measurements, combined results table and charts, repo setup, merging |
 
 Notes:
 - Shalom builds the skeleton first (empty server and client programs with a command loop, headers, stubs, Makefile). Chris fills in the handlers. Carvin supplies the secure pipe.
+- Measurements: each person measures their own topic (research questions in section 4) and sends Shalom the numbers; she builds the combined results table and charts. Decided Oct 16; the teammate guides say this. Chris and Carvin still need to confirm it.
 - Chris is also writing the separate RSA-to-PQC proof-of-concept assignment, so his load is kept lighter.
 - Carvin did not have a GitHub account and has used PyCharm. Assume he is new to Git, C toolchains and VS Code. Shalom and Chris are on Windows, Carvin is on a Mac. Shalom has Docker installed.
 - Shalom wants to get everything working herself first, then hand teammates a working setup. Do not design steps that require the three of them to troubleshoot together.
@@ -97,7 +98,9 @@ The 1.4 ms first key pair is mostly start-up cost; single runs are not results.
 
 Verified Oct 15: the Docker image builds and `make demo` runs in the local dev container on Shalom's Windows machine (Docker Desktop, WSL2).
 
-Not verified: Codespaces, and the Mac path. Treat those as untested until someone runs them.
+Oct 16: Shalom opened a codespace and it appeared to work. `make demo`, `make test` and the hook setting were not individually checked there, so treat Codespaces as lightly tested.
+
+Not verified: the Mac path (Carvin has not brought his laptop yet). Carvin is told to use Codespaces until someone tests a Mac.
 
 ## 6. Repo layout
 
@@ -235,7 +238,7 @@ Done (decided or verified):
 - Protocol v1 and the function contract agreed.
 - Git workflow and AI-guidance approach agreed.
 
-- Progress Report 1 filled in on the course template and submitted by Shalom.
+- Progress Report 1 filled in on the course template (not yet submitted as of Oct 15).
 
 Files Shalom has right now (all from the earlier session), and where they go:
 
@@ -281,7 +284,7 @@ Stop after each step, summarise in plain words, and let Shalom confirm before mo
 | Tue Oct 27 | Integration: encrypted channel carries a signed file, server stores it |
 | Thu Oct 29 | Download, list, verify. Sensor auto-uploads |
 | Tue Nov 3 | Basic chunking, resume if time. First measurements |
-| Thu Nov 5 | Measurements done, results table and charts. Decide cuts |
+| Thu Nov 5 | Each person's measurements done and sent to Shalom; she builds the results table and charts. Decide cuts |
 | Tue Nov 10 | Paper writing, each on own topic |
 | Thu Nov 12 | Edit paper, slides, rehearse demo, freeze code, zip |
 | Tue Nov 17 | Presentation; paper due 23:59 |

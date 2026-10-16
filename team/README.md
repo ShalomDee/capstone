@@ -35,10 +35,12 @@ A **farm sensor** (Shalom's part) is just a tiny client that uploads small readi
   │ secure pipe  │ <===================================> │ secure pipe  │   <- Carvin
   │ (Carvin)     │                                       │ (Carvin)     │
   └──────────────┘                                       └──────────────┘
-   sensor simulator, measurements, setup, merging: Shalom
+   sensor simulator, setup, merging, results table: Shalom
 ```
 
-Carvin builds the **pipe**: the connection and the encryption. Chris builds **what travels through it** and the **proof of who sent it**. Shalom builds the sensor, measures everything, and puts the pieces together.
+Carvin builds the **pipe**: the connection and the encryption. Chris builds **what travels through it** and the **proof of who sent it**. Shalom builds the sensor and puts the pieces together.
+
+**Measurements:** each of us measures our own topic and sends Shalom the numbers. Shalom combines them into one results table and the charts.
 
 The pieces talk to each other through agreed **function names** in the `.h` files in `common/` (the "contract"). Right now each function is a **stub**: a placeholder that returns a fake answer. Your job is to replace your stubs with real code without changing the names. Then the pieces fit together on integration day.
 

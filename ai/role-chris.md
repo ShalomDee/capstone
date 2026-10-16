@@ -35,3 +35,5 @@ Before Carvin's pipe works, test the identity functions on their own (sign a fil
 ## Measurements for the paper (topic 8)
 
 Do signatures verify? Is tampering caught (integrity)? Is the sender who they claim (sender authentication)? Also sign and verify times (median of many runs; `bench/time_sign.c` already does this).
+
+Chris runs these. Send the numbers to Shalom: what you measured, the median, how many runs, and which machine you ran on. She combines everyone's numbers into the results table and charts; Chris writes the paper section on what the numbers mean.

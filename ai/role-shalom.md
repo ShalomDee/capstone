@@ -16,6 +16,7 @@ She may push directly to `main`; she still prefers small commits.
 2. Size measurements: reading size compared with the signed record and the 3,309-byte ML-DSA-65 signature, first with the stubs, then with Chris's real code.
 3. CPU time and memory per reading.
 4. Python chart scripts in `bench/` (python3 and matplotlib are in the Dockerfile).
+5. Combine everyone's numbers into the results table and charts. Shalom measures topic 5 only; Carvin (topic 7) and Chris (topic 8) measure their own topics and send her the numbers.
 
 ## Integration duties
 

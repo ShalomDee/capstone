@@ -16,7 +16,7 @@ Each step is one action. Commands go in the terminal; the text after `#` explain
 
 ## Part 1: Open the project
 
-You work inside a **dev container**: a ready-made Linux machine with every tool installed, so all three of us have the same setup. There are two ways to open it. **Use option A (Codespaces) unless you have a reason not to.**
+You work inside a **dev container**: a ready-made Linux machine with every tool installed, so all three of us have the same setup. There are two ways to open it. **Use option A (Codespaces) unless you have a reason not to.** Carvin: use option A; option B has not been tested on a Mac.
 
 ### Option A: GitHub Codespaces (runs in the cloud, nothing to install)
 

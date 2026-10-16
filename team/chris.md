@@ -62,6 +62,8 @@ More in `ai/glossary.md`.
 - Is a wrong sender caught? For example, a file signed by Alice but claimed as Bob's.
 - How long signing and checking take. `bench/time_sign.c` already measures this; it starts giving real numbers once your code is in.
 
+Send your numbers to Shalom: what you measured, the median, how many runs, and which machine you ran on. She combines everyone's numbers into the results table and charts; you write the paper section on what yours mean.
+
 ## Tips for you
 
 - This lines up with your RSA-to-PQC assignment: same idea of a signature, but a quantum-safe one, with much bigger signatures than RSA.

@@ -54,8 +54,11 @@ More in `ai/glossary.md`.
 
 Shalom has timing helpers in `common/bench.h`. Always repeat a measurement many times and use the middle value (median), because shared machines are noisy.
 
+Send your numbers to Shalom: what you measured, the median, how many runs, and which machine you ran on. She combines everyone's numbers into the results table and charts; you write the paper section on what yours mean.
+
 ## Tips for you
 
 - You're on a Mac, but **everything runs inside the dev container** (Linux), so Mac-specific tutorials don't apply. Use the VS Code terminal that opens inside the container.
+- **Use Codespaces (option A in `docs/SETUP.md`).** Running the container locally on a Mac has not been tested yet. If you try it and anything fails, tell Shalom.
 - Coming from Python, the big C differences are: you manage memory yourself, strings are byte arrays ending in a zero byte, and the compiler is strict. Read the compiler's first error, not the last.
 - Build after every small change (`make`). Many small working steps beat one big broken one.

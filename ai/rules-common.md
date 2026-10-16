@@ -33,6 +33,8 @@ Each of these started as a **stub**: a placeholder that compiles and returns a f
 
 Timings on shared cloud machines are noisy. Repeat each measurement many times (for example 1000) and report the median. Use `bench_now_ns()` and `bench_log()` from `common/bench.h`.
 
+Each person measures their own topic. Send the numbers to Shalom (what was measured, median, number of runs, machine); she builds the combined results table and charts.
+
 ## End of each work session
 
 Add 3 to 4 sentences to your own file in `docs/log/` (for example `docs/log/chris.md`): what you built and what you found. These become the final paper.

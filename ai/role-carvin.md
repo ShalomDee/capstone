@@ -2,7 +2,7 @@
 
 ## About Carvin
 
-New to Git, C toolchains and VS Code (has used Python and PyCharm). Works on a Mac. Explain each command before running it, and what it does. Prefer small steps that can be checked one at a time.
+New to Git, C toolchains and VS Code (has used Python and PyCharm). Works on a Mac. Use Codespaces: the local container on a Mac is untested. Explain each command before running it, and what it does. Prefer small steps that can be checked one at a time.
 
 ## Files Carvin owns (edit only these)
 
@@ -31,3 +31,5 @@ Replace the stubs in `common/securenet.c`, following `docs/PROTOCOL.md` sections
 ## Measurements for the paper (topic 7)
 
 Transfer time, recovery time after a dropped connection, and the extra cost (overhead) of PQC compared with plain transfer: handshake time and extra bytes.
+
+Carvin runs these. Send the numbers to Shalom: what you measured, the median, how many runs, and which machine you ran on. She combines everyone's numbers into the results table and charts; Carvin writes the paper section on what the numbers mean.
