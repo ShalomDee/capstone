@@ -26,6 +26,7 @@ Everything runs inside the dev container (`.devcontainer/`): Ubuntu 24.04 with l
 make            # build all programs into build/
 make test       # build and run the tests
 make demo       # toolchain check: ML-KEM and ML-DSA run and verify
+make bench      # liboqs timings: ML-KEM-768 and ML-DSA-65 medians over 1000 runs
 make clean      # delete build/
 ```
 
@@ -37,6 +38,7 @@ Programs (in `build/`):
 | `client` | `client <id> [host] [port]` | Command loop: `register`, `upload`, `list`, `download`, `verify` |
 | `sensor` | `sensor <id> [count]` | Simulated farm sensor |
 | `time_sign` | `time_sign [runs]` | Median sign and verify times |
+| `time_pqc` | `time_pqc [runs]` | Median liboqs timings and tamper check, run by `make bench` |
 | `pqc_demo` | | Toolchain check, run by `make demo` |
 
 Measurement lines are printed as `BENCH,label,value,unit`.
