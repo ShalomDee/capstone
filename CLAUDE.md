@@ -246,7 +246,7 @@ Done (decided or verified):
 Not done or not confirmed (check before assuming):
 - Progress Report 2 (due Sun Oct 18) not yet submitted.
 - The Mac path (see section 5).
-- Step 7 (topic 5 sensor work) is in progress; the sensor reading format is awaiting Shalom's approval.
+- Step 7 (topic 5) in progress. Done Oct 18: sensor reading format v1 approved and built (`sensor/reading.h`), `make sensor-sizes` gives bytes per reading for batches of 1, 10, 100 (computed from PROTOCOL.md against stubs). Left: CPU time and memory per reading with real signing (needs Chris), real byte counts on the socket (needs Carvin).
 
 ## 12. Your task list, in order
 

@@ -5,7 +5,9 @@
 #include "framing.h"
 #include "identity.h"
 #include "protocol.h"
+#include "reading.h"
 #include "securenet.h"
+#include "wire_cost.h"
 
 #include <oqs/oqs.h>
 #include <stdio.h>
@@ -140,6 +142,127 @@ static void test_identity_contract_sizes(void)
     CHECK(get_u16(rec + 7) == 9);
 }
 
+static int parse_str(const char *s, reading *r)
+{
+    return reading_parse(s, strlen(s), r);
+}
+
+static void test_reading_format_and_parse(void)
+{
+    reading r, back;
+    char line[READING_LINE_MAX];
+    size_t len;
+
+    CHECK(parse_str("v1,field-a-01,42,1792345678,21.5,43,31\n", &r) == QD_OK);
+    CHECK(strcmp(r.id, "field-a-01") == 0 && r.seq == 42 && r.time == 1792345678);
+    CHECK(r.temp_tenths == 215 && r.humidity == 43 && r.soil == 31);
+    CHECK(reading_format(&r, line, sizeof line, &len) == QD_OK);
+    CHECK(len == 39 && strcmp(line, "v1,field-a-01,42,1792345678,21.5,43,31\n") == 0);
+
+    r.temp_tenths = -5;                                   /* below zero keeps its sign */
+    CHECK(reading_format(&r, line, sizeof line, &len) == QD_OK);
+    CHECK(strstr(line, ",-0.5,") != NULL);
+    CHECK(reading_parse(line, len, &back) == QD_OK && back.temp_tenths == -5);
+
+    for (uint32_t seq = 0; seq < 200; seq++) {            /* simulated readings round-trip */
+        CHECK(reading_simulate("s1", seq, 1792345678 + seq * 60, &r) == QD_OK);
+        CHECK(reading_format(&r, line, sizeof line, &len) == QD_OK);
+        CHECK(reading_parse(line, len, &back) == QD_OK && memcmp(&r, &back, sizeof r) == 0);
+    }
+
+    /* Each of these must be refused */
+    const char *bad[] = {
+        "v1,field-a-01,42,1792345678,21.5,43,31",         /* no newline */
+        "v1,field-a-01,42,1792345678,21.5,43,31\r\n",     /* Windows line ending */
+        "v2,field-a-01,42,1792345678,21.5,43,31\n",       /* unknown version */
+        "v1,field a,42,1792345678,21.5,43,31\n",          /* space in ID */
+        "v1,,42,1792345678,21.5,43,31\n",                 /* empty ID */
+        "v1,field-a-01,042,1792345678,21.5,43,31\n",      /* leading zero */
+        "v1,field-a-01,-1,1792345678,21.5,43,31\n",       /* negative seq */
+        "v1,field-a-01,1000000,1792345678,21.5,43,31\n",  /* seq too big */
+        "v1,field-a-01,42,0,21.5,43,31\n",                /* clock not set */
+        "v1,field-a-01,42,1792345678,21,43,31\n",         /* no decimal */
+        "v1,field-a-01,42,1792345678,21.55,43,31\n",      /* two decimals */
+        "v1,field-a-01,42,1792345678,-0.0,43,31\n",       /* negative zero */
+        "v1,field-a-01,42,1792345678,90.0,43,31\n",       /* temperature out of range */
+        "v1,field-a-01,42,1792345678,21.5,101,31\n",      /* humidity over 100 */
+        "v1,field-a-01,42,1792345678,21.5,43\n",          /* field missing */
+        "v1,field-a-01,42,1792345678,21.5,43,31,7\n",     /* extra field */
+        "v1,field-a-01,42,1792345678,21.5, 43,31\n",      /* space */
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
+        CHECK(parse_str(bad[i], &r) == QD_ERR_FORMAT);
+}
+
+static void test_reading_batch_checks(void)
+{
+    reading b[4];
+    const char *why;
+    for (uint32_t i = 0; i < 4; i++)
+        CHECK(reading_simulate("s1", 10 + i, 1792345678 + i * 60, &b[i]) == QD_OK);
+    CHECK(reading_check_batch(b, 4, &why) == QD_OK);
+
+    b[2].seq = 13;                                        /* 10, 11, 13: gap */
+    CHECK(reading_check_batch(b, 3, &why) == QD_ERR_FORMAT && strstr(why, "gap"));
+    b[2].seq = 11;                                        /* 10, 11, 11: duplicate */
+    CHECK(reading_check_batch(b, 3, &why) == QD_ERR_FORMAT && strstr(why, "duplicate"));
+    b[2].seq = 9;                                         /* 10, 11, 9: out of order */
+    CHECK(reading_check_batch(b, 3, &why) == QD_ERR_FORMAT && strstr(why, "order"));
+    b[2].seq = 12;
+    b[2].time = b[1].time - 1;                            /* clock went backwards */
+    CHECK(reading_check_batch(b, 3, &why) == QD_ERR_FORMAT && strstr(why, "backwards"));
+    b[2].time = b[1].time;                                /* same second is allowed */
+    CHECK(reading_check_batch(b, 3, &why) == QD_OK);
+    strcpy(b[3].id, "s2");                                /* two sensors in one file */
+    CHECK(reading_check_batch(b, 4, &why) == QD_ERR_FORMAT && strstr(why, "sensor"));
+    CHECK(reading_check_batch(b, 0, &why) == QD_ERR_ARG);
+}
+
+static void test_reading_filenames(void)
+{
+    char name[QD_NAME_MAX + 1];
+    CHECK(reading_filename("field-a-01", 42, 42, name, sizeof name) == QD_OK);
+    CHECK(strcmp(name, "field-a-01-000042.csv") == 0);
+    CHECK(reading_filename("field-a-01", 40, 49, name, sizeof name) == QD_OK);
+    CHECK(strcmp(name, "field-a-01-000040-000049.csv") == 0);
+    CHECK(reading_filename("field-a-01", 49, 40, name, sizeof name) == QD_ERR_ARG);
+    CHECK(reading_filename("../etc", 1, 1, name, sizeof name) == QD_ERR_ARG);
+    CHECK(reading_filename("field-a-01", 1, 2, name, 8) == QD_ERR_BUFFER);
+}
+
+static void test_reading_file(void)
+{
+    char path[] = "/tmp/qd_reading_XXXXXX";
+    int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    const char good[] = "v1,s1,0,1792345678,21.5,43,31\nv1,s1,1,1792345738,21.6,44,31\n";
+    CHECK(write(fd, good, sizeof good - 1) == (ssize_t)(sizeof good - 1));
+    reading r[4];
+    size_t n = 0;
+    const char *why;
+    CHECK(reading_read_file(path, r, 4, &n, &why) == QD_OK && n == 2);
+    CHECK(reading_read_file(path, r, 1, &n, &why) == QD_ERR_BUFFER);
+
+    const char gap[] = "v1,s1,3,1792345858,21.5,43,31\n";   /* appended: 0, 1, 3 */
+    CHECK(write(fd, gap, sizeof gap - 1) == (ssize_t)(sizeof gap - 1));
+    CHECK(reading_read_file(path, r, 4, &n, &why) == QD_ERR_FORMAT && strstr(why, "gap"));
+    close(fd);
+    unlink(path);
+}
+
+static void test_wire_cost(void)
+{
+    /* One 39-byte reading, 83-byte record: worked out by hand from PROTOCOL.md */
+    CHECK(wire_upload_c2s(83, QD_SIG_BYTES, 39) == 3418 + 69 + 22);
+    CHECK(wire_upload_c2s(83, QD_SIG_BYTES, 0) == 3418 + 22);              /* no chunks */
+    CHECK(wire_upload_c2s(83, QD_SIG_BYTES, QD_CHUNK_MAX + 1) ==
+          3418 + 2 * 30 + QD_CHUNK_MAX + 1 + 22);                          /* two chunks */
+    CHECK(wire_upload_s2c() == 22);
+    CHECK(wire_handshake_c2s() == 6 + 1093);
+    CHECK(wire_handshake_s2c() == 1189);
+    CHECK(wire_register_c2s(10) == 22 + 1 + 10 + 2 + 1952);
+}
+
 int main(void)
 {
     test_byte_order();
@@ -148,6 +271,11 @@ int main(void)
     test_constants_match_liboqs();
     test_bench_clock();
     test_identity_contract_sizes();
+    test_reading_format_and_parse();
+    test_reading_batch_checks();
+    test_reading_filenames();
+    test_reading_file();
+    test_wire_cost();
 
     printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

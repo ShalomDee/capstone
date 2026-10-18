@@ -27,3 +27,5 @@ sign                   median   0.0920 ms   p10   0.0472   p90   0.2335
 verify                 median   0.0331 ms   p10   0.0302   p90   0.0526
 tampered readings rejected: 1000 of 1000
 ```
+
+Later on 2026-10-18: Built the sensor reading format agreed today (v1 CSV, one newline-terminated line per reading, 39 bytes for the example) in sensor/reading.c, with strict parsing and batch checks that refuse gaps, duplicates, reordering, mixed sensors and clocks going backwards; `make test` now runs 701 checks. `make sensor-sizes` sends 100 simulated readings in files of 1, 10 and 100, one signature per file, using real file and record sizes but the identity stub and byte counts computed from PROTOCOL.md, since the secure pipe is still a stub. Sensor-to-server bytes per reading were 3,508.9 (batch 1), 386.6 (batch 10) and 73.7 (batch 100); the signature is 94.3% of upload bytes at batch 1 and 44.9% at batch 100. Connection setup adds 3,086 bytes to the server and 1,211 back, once per connection; next is CPU time and memory per reading once Chris's real signing lands, and checking these byte counts against Carvin's real sec_send.
