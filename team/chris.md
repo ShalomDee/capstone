@@ -32,6 +32,7 @@ The first time a user registers, the server remembers their public key. After th
 
 1. **Keys, sign, check** (by Tue Oct 20). Fill in `id_generate_keys`, `id_sign`, `id_verify`, `id_hash_file`. Test them on their own: sign something, check it passes, change one byte, check it fails.
 2. **Signed record offline** (by Thu Oct 22). Fill in `id_make_record` with real values. Sign a record and check it, still without the network.
+   **Watch out:** `id_make_record` is given a file **path**, such as `sensor-data/field-a-01-000042.csv`. Use the full path to open the file (for its size and fingerprint), but store **only the file name** in the record, here `field-a-01-000042.csv`. The server refuses names containing `/` (`docs/PROTOCOL.md` section 6.1), so if the folder ends up in the record, every upload from a folder would fail.
 3. **Integration** (Tue Oct 27). Fill in register and upload on both client and server, using Carvin's pipe.
 4. **List, download, verify** (Thu Oct 29).
 

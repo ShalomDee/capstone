@@ -98,7 +98,7 @@ The 1.4 ms first key pair is mostly start-up cost; single runs are not results.
 
 Verified Oct 15: the Docker image builds and `make demo` runs in the local dev container on Shalom's Windows machine (Docker Desktop, WSL2).
 
-Oct 16: Shalom opened a codespace and it appeared to work. `make demo`, `make test` and the hook setting were not individually checked there, so treat Codespaces as lightly tested.
+Oct 16: Shalom opened a codespace and it appeared to work. Oct 18: Shalom confirmed Codespaces works on Windows.
 
 Not verified: the Mac path (Carvin has not brought his laptop yet). Carvin is told to use Codespaces until someone tests a Mac.
 
@@ -229,37 +229,24 @@ Rules every assistant must follow:
 7. Run `make` and `make test` before suggesting a push. Report honestly what was and wasn't tested.
 8. Keep changes small and inside the owner's folder.
 
-## 11. Status as of Oct 15, 2026
+## 11. Status as of Oct 18, 2026
 
 Done (decided or verified):
 - Roles and topic ownership agreed.
 - Toolchain chosen, liboqs 0.16.0 pinned.
-- Dev container files drafted (Dockerfile, devcontainer.json, Makefile, demo/pqc_demo.c, .gitignore) and the liboqs build plus demo verified on Ubuntu 24.04.
 - Protocol v1 and the function contract agreed.
 - Git workflow and AI-guidance approach agreed.
+- Task list steps 1 to 6 (section 12) are done: repo inspected; dev container built and `make demo` run; `docs/PROTOCOL.md` written; skeleton built (headers, stubs, server/client command loops, sensor stub, bench helpers, `make test` passing 44 checks); `.claude/settings.json`, `CODEOWNERS`, `AGENTS.md`, `.github/copilot-instructions.md`, `ai/` files, commit-msg hook and `README.md` written; `docs/SETUP.md` written.
+- The repo is on GitHub at `ShalomDee/capstone`.
+- Progress Report 1 submitted.
+- Teammates invited and branch protection set on `main` (confirmed by Shalom Oct 18).
+- Dev container verified locally on Windows (Docker Desktop, WSL2). Shalom confirmed on Oct 18 that Codespaces works on Windows.
+- Oct 18: `bench/time_pqc.c` added with a `make bench` target (liboqs ML-KEM-768 and ML-DSA-65 medians over 1000 runs, plus a tamper check). Output recorded in `docs/log/shalom.md`.
 
-- Progress Report 1 filled in on the course template (not yet submitted as of Oct 15).
-
-Files Shalom has right now (all from the earlier session), and where they go:
-
-| File | Repo path |
-|---|---|
-| Dockerfile | `.devcontainer/Dockerfile` |
-| devcontainer.json | `.devcontainer/devcontainer.json` |
-| Makefile | `Makefile` |
-| pqc_demo.c | `demo/pqc_demo.c` |
-| gitignore | `.gitignore` (note the leading dot) |
-| this file | `CLAUDE.md` |
-| CHATGPT_BRIEF.md | not in the repo; for teammates who use ChatGPT |
-
-An earlier chat session wrote and tested a code skeleton, tests, a commit-message hook and draft docs, but it ran out of usage before delivering any of them. None of that work exists. Rebuild it from this file.
-
-Not done or not confirmed (check the repo before assuming):
-- Whether the GitHub repo exists and the files above are committed at those paths.
-- Teammates invited, Carvin's GitHub account created.
-- The skeleton (headers, stubs, server/client command loop, `make test`). A previous session started it but never delivered it.
-- `README.md`, `docs/PROTOCOL.md`, `docs/SETUP.md`, `docs/log/`, `AGENTS.md`, `ai/` files, `.github/CODEOWNERS`, `.github/copilot-instructions.md`, `.claude/settings.json`, the commit-msg hook.
-- Docker build and Codespaces launch tested end to end.
+Not done or not confirmed (check before assuming):
+- Progress Report 2 (due Sun Oct 18) not yet submitted.
+- The Mac path (see section 5).
+- Step 7 (topic 5) in progress. Done Oct 18: sensor reading format v1 approved and built (`sensor/reading.h`), `make sensor-sizes` gives bytes per reading for batches of 1, 10, 100 (computed from PROTOCOL.md against stubs). Left: CPU time and memory per reading with real signing (needs Chris), real byte counts on the socket (needs Carvin).
 
 ## 12. Your task list, in order
 

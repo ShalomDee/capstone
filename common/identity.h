@@ -23,6 +23,8 @@ int id_verify(const uint8_t *pk, const uint8_t *msg, size_t n, const uint8_t *si
 int id_hash_file(const char *path, uint8_t out[32]);
 
 /* Build the signed record for file, uploaded by id.
+ * file is a path; it is opened for the size and hash, but only its base name
+ * (after the last '/') goes in the record, since PROTOCOL.md 6.1 forbids '/'.
  * rec must hold at least QD_RECORD_MAX bytes; *rec_len is set to the length used. */
 int id_make_record(const char *id, const char *file, uint8_t *rec, size_t *rec_len);
 

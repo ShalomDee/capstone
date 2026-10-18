@@ -20,6 +20,9 @@ Follow `docs/PROTOCOL.md` sections 5.2 and 6.
 2. **Signing and checking (ML-DSA-65):** `id_sign` and `id_verify` with liboqs.
 3. **File fingerprint (SHA-256):** `id_hash_file` with OpenSSL's `EVP_Digest*` functions, reading the file in pieces.
 4. **Signed record:** `id_make_record` with the real file size, hash and current time. The stub already writes the correct layout with zeros.
+   - The `file` argument is a **path** (for example `sensor-data/field-a-01-000042.csv`). Open that path to get the size and hash, but put **only the base name** (the part after the last `/`, here `field-a-01-000042.csv`) in the record's filename field. PROTOCOL.md section 6.1 forbids `/` in file names, so a record holding a folder path would be rejected by the server.
+   - The stub currently copies `file` unchanged. Callers (the sensor, the client's `upload`) must work whether they pass a bare name or a path.
+   - Add a test: a path with a folder gives a record whose filename has no `/`.
 5. **Server handlers:** register (trust on first use), upload (begin, chunks, end with the three checks in order), list, download, key request. Check filenames as section 6.1 says, so nobody can write outside the storage folder.
 6. **Client commands:** `register`, `upload`, `list`, `download`, `verify`. Use `client_open()` to connect.
 
