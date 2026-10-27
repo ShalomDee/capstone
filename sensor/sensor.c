@@ -109,7 +109,7 @@ int main(int argc, char **argv)
     /* Key path is fixed before moving into outdir. File name to match Chris's id_generate_keys. */
     char cwd[PATH_MAX], key_path[PATH_MAX + QD_ID_MAX + 8];
     if (!getcwd(cwd, sizeof cwd)) { perror("getcwd"); return 1; }
-    snprintf(key_path, sizeof key_path, "%s/keys/%s", cwd, id);
+    snprintf(key_path, sizeof key_path, "%s/keys/%s.key", cwd, id);
 
     /* Work inside outdir so the signed record holds only the file name, never a
      * folder path (PROTOCOL.md 6.1 forbids '/' in file names). */
