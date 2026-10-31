@@ -7,7 +7,7 @@ New to Git, C toolchains and VS Code (has used Python and PyCharm). Works on a M
 ## Files Carvin owns (edit only these)
 
 - `common/securenet.c`
-- New test code for the pipe: add a function to `tests/test_main.c` only after asking Shalom, or put a separate test in the PR description.
+- Tests for the pipe: add your own test functions to `tests/test_main.c` (see "Tests" in `ai/rules-common.md`). Don't change other people's tests.
 
 `common/securenet.h` is the shared contract. Do not change it without Shalom's approval.
 
@@ -27,6 +27,8 @@ Replace the stubs in `common/securenet.c`, following `docs/PROTOCOL.md` sections
 - Thu Oct 22: ML-KEM handshake gives both sides the same secret.
 - Tue Oct 27: encrypted messages carry a signed file (integration with Chris).
 - Tue Nov 3: chunked transfer; resume after a dropped connection if time allows.
+
+**Revised Oct 31 (these dates were missed):** Shalom is away Mon Nov 2 to Fri Nov 6 and cannot answer questions that week. By **Fri Nov 6, 23:59**: all of `common/securenet.c` (steps 1 to 5 above) working, with tests in `tests/test_main.c`, pushed to your branch with a PR open to `main`. Push as you go so the work is visible. In the same PR, put your topic 7 measurements that need only the pipe: handshake time (median of many runs) and bytes sent during the handshake.
 
 ## Measurements for the paper (topic 7)
 

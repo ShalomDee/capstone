@@ -229,7 +229,7 @@ Rules every assistant must follow:
 7. Run `make` and `make test` before suggesting a push. Report honestly what was and wasn't tested.
 8. Keep changes small and inside the owner's folder.
 
-## 11. Status as of Oct 18, 2026
+## 11. Status as of Oct 31, 2026
 
 Done (decided or verified):
 - Roles and topic ownership agreed.
@@ -242,8 +242,14 @@ Done (decided or verified):
 - Teammates invited and branch protection set on `main` (confirmed by Shalom Oct 18).
 - Dev container verified locally on Windows (Docker Desktop, WSL2). Shalom confirmed on Oct 18 that Codespaces works on Windows.
 - Oct 18: `bench/time_pqc.c` added with a `make bench` target (liboqs ML-KEM-768 and ML-DSA-65 medians over 1000 runs, plus a tamper check). Output recorded in `docs/log/shalom.md`.
+- Oct 27: Chris's PR #2 (`id_generate_keys`, ML-DSA-65 key generation) reviewed and merged. Builds with no warnings, `make test` 701 of 701, keys saved as `<dir>/<id>.key` (0600) and `<dir>/<id>.pub` (1952 bytes), refuses to overwrite, rejects unsafe IDs per PROTOCOL.md 6.1. `main` merged into `shalom/sensor` Oct 31.
+- Oct 31: tests rule decided. Each teammate writes tests for their own functions in `tests/test_main.c` in the same PR; Shalom reviews. Written into `ai/rules-common.md` and the role files.
+- Oct 31: Shalom asked Dr. Rawal to complete the project independently. He said it is too late to change teams, he will consider individual contributions when grading, and asked her to keep collaborating and keep a record of her work. Carvin also did not agree to a change. The original split in section 3 stands. Keep `docs/log/shalom.md` current as the record.
 
 Not done or not confirmed (check before assuming):
+- Chris: `id_sign`, `id_verify`, `id_hash_file`, `id_make_record`, server handlers, client commands, tests, topic 8 measurements. Oct 20 and Oct 22 milestones missed. Small cleanup asked for: duplicate `#include <string.h>` in `common/identity.c`.
+- Carvin: no work on `common/securenet.c` as of Oct 31 (still Shalom's stub). Oct 20 and Oct 22 milestones missed.
+- Shalom is away Mon Nov 2 to Fri Nov 6 and will not follow up with anyone that week. Deadline given to Chris and Carvin: all code and tests pushed with a PR open by Fri Nov 6, 23:59 (see section 13).
 - Progress Report 2 (due Sun Oct 18) not yet submitted.
 - The Mac path (see section 5).
 - Step 7 (topic 5) in progress. Done Oct 18: sensor reading format v1 approved and built (`sensor/reading.h`), `make sensor-sizes` gives bytes per reading for batches of 1, 10, 100 (computed from PROTOCOL.md against stubs). Left: CPU time and memory per reading with real signing (needs Chris), real byte counts on the socket (needs Carvin).
@@ -275,6 +281,15 @@ Stop after each step, summarise in plain words, and let Shalom confirm before mo
 | Tue Nov 10 | Paper writing, each on own topic |
 | Thu Nov 12 | Edit paper, slides, rehearse demo, freeze code, zip |
 | Tue Nov 17 | Presentation; paper due 23:59 |
+
+Revised Oct 31 (the Oct 20 to Oct 29 rows slipped, and Shalom is away Nov 2 to 6):
+
+| Date | Goal |
+|---|---|
+| Fri Nov 6, 23:59 | Chris and Carvin: all code and tests pushed, PR open to `main`, plus the measurements that need only their own code (Chris: sign/verify times, tamper and wrong-key checks; Carvin: handshake time and bytes) |
+| Sat Nov 7 to Mon Nov 9 | Shalom reviews and merges, integrates, runs end-to-end measurements (transfer time, real bytes on the socket, signed sensor readings). Decide cuts |
+| Tue Nov 10 | Paper writing, each on own topic |
+| Thu Nov 12 | Edit paper, slides, rehearse demo, freeze code, zip |
 
 Must-have: ML-KEM handshake, AES-encrypted upload, signed upload and verify, sensor simulator, three measurements (transfer time, message size, signature check).
 Stretch, cut in this order if short on time: share links, version history, resume after drop, front end.

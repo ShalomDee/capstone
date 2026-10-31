@@ -9,6 +9,7 @@ Works on Windows, inside the dev container. Also writing a separate RSA-to-PQC a
 - `common/identity.c`
 - `server/handlers.c` and `server/handlers.h` (the `server_conn` struct may gain fields; tell Shalom in the PR)
 - `client/commands.c`
+- Tests for your functions: add your own test functions to `tests/test_main.c` (see "Tests" in `ai/rules-common.md`). Don't change other people's tests.
 
 `common/identity.h` and `client/commands.h` are the shared contract. Do not change them without Shalom's approval.
 
@@ -28,12 +29,20 @@ Follow `docs/PROTOCOL.md` sections 5.2 and 6.
 
 Before Carvin's pipe works, test the identity functions on their own (sign a file's record, then verify it; change one byte and check it fails).
 
+Tests to add in `tests/test_main.c`:
+- Key generation: both files are created, the private key is 0600, a second run refuses to overwrite, bad IDs (`/`, `\`, `.`, `..`, empty, over 64 characters) are rejected.
+- Signing: a signature verifies; changing one byte of the message or the signature makes it fail.
+- The existing `test_identity_contract_sizes` signs with `keys/test.key`, which only the stub accepts. Once `id_sign` is real, change that test to generate a key pair first (in a test folder) and verify with the real public key.
+- Also remove the duplicate `#include <string.h>` in `common/identity.c`.
+
 ## Milestones
 
 - Tue Oct 20: key generation, sign and verify a file hash.
 - Thu Oct 22: signed upload record checked offline.
 - Tue Oct 27: integration with Carvin: the server stores a signed file.
 - Thu Oct 29: download, list, verify.
+
+**Revised Oct 31:** key generation is merged (PR #2). Shalom is away Mon Nov 2 to Fri Nov 6 and cannot answer questions that week. By **Fri Nov 6, 23:59**: the rest of `common/identity.c` (steps 2 to 4), the server handlers and client commands (steps 5 and 6), and the tests above, pushed to your branch with a PR open to `main`. Signing (`id_sign`, `id_verify`) matters most: if you can, push it first as its own PR, since Shalom's sensor measurements wait on it. Push as you go so the work is visible. In the same PR, put your topic 8 measurements (see below).
 
 ## Measurements for the paper (topic 8)
 
