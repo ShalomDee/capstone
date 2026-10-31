@@ -11,6 +11,8 @@ Read `AGENTS.md` first. This file adds the day-to-day details.
 - `server/handlers.c`, `client/commands.c` (Chris): what happens for each command.
 - `server/main.c`, `client/main.c`, `sensor/`, `bench/`, `tests/` (Shalom).
 
+**Tests:** each teammate writes the tests for their own functions and adds them to `tests/test_main.c` in the same PR as the code. This is the one place outside your own files you may edit: add your own test functions and call them from `main()`, and don't change other people's tests. Shalom reviews them with the rest of the PR.
+
 Each of these started as a **stub**: a placeholder that compiles and returns a fake value or "not implemented yet". Replace the stub's body with real code. Do not change the function's name, arguments or return type; those are the agreed contract.
 
 ## Git workflow (plain steps)

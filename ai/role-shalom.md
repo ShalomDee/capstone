@@ -8,6 +8,8 @@ Repo owner and integrator: reviews and merges every PR. Computer science major, 
 
 Everything not owned by Carvin or Chris: `sensor/`, `bench/`, `tests/`, `docs/`, `ai/`, `scripts/`, `server/main.c`, `client/main.c`, `common/framing.*`, `common/bench.*`, `common/protocol.*`, all `common/*.h` headers, `Makefile`, `.devcontainer/`, `.github/`, `README.md`, `AGENTS.md`, `CLAUDE.md`.
 
+Exception: Chris and Carvin add tests for their own functions to `tests/test_main.c` in their own PRs (decided Oct 31). Shalom reviews those tests; a PR that adds functions without tests gets sent back.
+
 She may push directly to `main`; she still prefers small commits.
 
 ## What to build (topic 5)
