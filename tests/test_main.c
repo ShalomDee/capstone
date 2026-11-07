@@ -8,6 +8,8 @@
 #include "reading.h"
 #include "securenet.h"
 #include "wire_cost.h"
+#include <stdlib.h>
+#include <sys/stat.h>
 
 #include <oqs/oqs.h>
 #include <stdio.h>
@@ -127,19 +129,131 @@ static void test_bench_clock(void)
 
 static void test_identity_contract_sizes(void)
 {
-    uint8_t sig[QD_SIG_BYTES], rec[QD_RECORD_MAX], pk[QD_SIG_PK_BYTES] = {0};
-    size_t sig_len = 0, rec_len = 0;
-    const uint8_t msg[] = "hello";
+    /* Make a temporary folder for the test files. */
+    char dir[] = "/tmp/qd_identity_XXXXXX";
+    CHECK(mkdtemp(dir) != NULL);
 
-    CHECK(id_sign("keys/test.key", msg, sizeof msg, sig, &sig_len) == QD_OK);
+    char key[256];
+    char pub[256];
+    char data[256];
+
+    snprintf(key,  sizeof(key),  "%s/alice.key", dir);
+    snprintf(pub,  sizeof(pub),  "%s/alice.pub", dir);
+    snprintf(data, sizeof(data), "%s/notes.txt", dir);
+
+    /* Test key generation and invalid usernames. */
+    CHECK(id_generate_keys("alice", dir) == QD_OK);
+    CHECK(id_generate_keys("alice", dir) == QD_ERR_FILE);
+    CHECK(id_generate_keys("../bad", dir) == QD_ERR_ARG);
+    CHECK(id_generate_keys(".", dir) == QD_ERR_ARG);
+    CHECK(id_generate_keys("", dir) == QD_ERR_ARG);
+
+    /* Check the private-key file permissions. */
+    struct stat st;
+    CHECK(stat(key, &st) == 0 && (st.st_mode & 0777) == 0600);
+
+    uint8_t pk[QD_SIG_PK_BYTES];
+    uint8_t sig[QD_SIG_BYTES];
+    uint8_t hash[QD_SHA256_BYTES];
+    uint8_t rec[QD_RECORD_MAX];
+
+    /* Read the public key. */
+    FILE *f = fopen(pub, "rb");
+    CHECK(f != NULL);
+
+    if (f == NULL) {
+        return;
+    }
+
+    CHECK(fread(pk, 1, sizeof(pk), f) == sizeof(pk));
+    CHECK(fclose(f) == 0);
+
+    /* Sign and verify a message. */
+    uint8_t msg[] = "hello";
+    size_t sig_len = 0;
+    size_t rec_len = 0;
+
+    CHECK(id_sign(key, msg, sizeof(msg), sig, &sig_len) == QD_OK);
     CHECK(sig_len == QD_SIG_BYTES);
-    CHECK(id_verify(pk, msg, sizeof msg, sig, sig_len) == QD_OK);
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_OK);
 
-    CHECK(id_make_record("alice", "notes.txt", rec, &rec_len) == QD_OK);
+    /* Change the message: verification should fail. */
+    msg[0] ^= 1;
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* Restore the message, then change the signature. */
+    msg[0] ^= 1;
+    sig[0] ^= 1;
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+    sig[0] ^= 1;
+
+    /* The wrong public key should also fail. */
+    uint8_t wrong[QD_SIG_PK_BYTES] = {0};
+    CHECK(id_verify(wrong, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* A missing private-key file should return an error. */
+    CHECK(id_sign("/no/such/key", msg, sizeof(msg), sig, &sig_len)
+          == QD_ERR_FILE);
+
+    /* Create a real file for the hash and record tests. */
+    f = fopen(data, "wb");
+    CHECK(f != NULL);
+
+    if (f == NULL) {
+        return;
+    }
+
+    CHECK(fwrite("abc", 1, 3, f) == 3);
+    CHECK(fclose(f) == 0);
+
+    /* Known SHA-256 fingerprint for the text "abc". */
+    static const uint8_t expected[32] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
+    };
+
+    CHECK(id_hash_file(data, hash) == QD_OK);
+    CHECK(memcmp(hash, expected, sizeof(expected)) == 0);
+
+    /* Build the upload record and check its information. */
+    CHECK(id_make_record("alice", data, rec, &rec_len) == QD_OK);
     CHECK(rec_len == 1 + 1 + 5 + 2 + 9 + 8 + 32 + 8);
+
     CHECK(rec[0] == QD_RECORD_VERSION && rec[1] == 5);
     CHECK(memcmp(rec + 2, "alice", 5) == 0);
     CHECK(get_u16(rec + 7) == 9);
+    CHECK(memcmp(rec + 9, "notes.txt", 9) == 0);
+    CHECK(get_u64(rec + 18) == 3);
+    CHECK(memcmp(rec + 26, expected, 32) == 0);
+
+    /* Sign the record, then check that changing it is caught. */
+    CHECK(id_sign(key, rec, rec_len, sig, &sig_len) == QD_OK);
+    CHECK(id_verify(pk, rec, rec_len, sig, sig_len) == QD_OK);
+
+    rec[26] ^= 1;
+    CHECK(id_verify(pk, rec, rec_len, sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* Change the file and check that its fingerprint changes. */
+    f = fopen(data, "wb");
+    CHECK(f != NULL);
+
+    if (f != NULL) {
+        CHECK(fwrite("abd", 1, 3, f) == 3);
+        CHECK(fclose(f) == 0);
+    }
+
+    CHECK(id_hash_file(data, hash) == QD_OK);
+    CHECK(memcmp(hash, expected, 32) != 0);
+    CHECK(id_hash_file("/no/such/file", hash) == QD_ERR_FILE);
+    CHECK(id_make_record("../alice", data, rec, &rec_len) == QD_ERR_ARG);
+
+    /* Remove the temporary test files. */
+    unlink(key);
+    unlink(pub);
+    unlink(data);
+    rmdir(dir);
 }
 
 static int parse_str(const char *s, reading *r)
