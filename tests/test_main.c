@@ -377,6 +377,120 @@ static void test_wire_cost(void)
     CHECK(wire_register_c2s(10) == 22 + 1 + 10 + 2 + 1952);
 }
 
+/* Exercise the real handlers with a scripted transport. Include the handler
+ * source so the existing test target can substitute only sec_send/sec_recv. */
+static int upload_test_send(sec_session *, uint8_t, const uint8_t *, size_t);
+static int upload_test_recv(sec_session *, uint8_t *, uint8_t *, size_t, size_t *);
+#define sec_send upload_test_send
+#define sec_recv upload_test_recv
+#include "../server/handlers.c"
+#undef sec_send
+#undef sec_recv
+
+typedef struct {
+    uint8_t type;
+    size_t len;
+    uint8_t body[32];
+} upload_test_frame;
+static upload_test_frame upload_input[3], upload_output[4];
+static size_t upload_read, upload_sent;
+
+static int upload_test_send(sec_session *s, uint8_t type, const uint8_t *body, size_t len)
+{
+    (void)s;
+    if (upload_sent >= 4) return QD_ERR_BUFFER;
+    upload_test_frame *out = &upload_output[upload_sent++];
+    out->type = type;
+    out->len = len;
+    size_t copy = len < sizeof out->body ? len : sizeof out->body;
+    if (copy) memcpy(out->body, body, copy);
+    return QD_OK;
+}
+
+static int upload_test_recv(sec_session *s, uint8_t *type, uint8_t *body,
+                            size_t cap, size_t *len)
+{
+    (void)s;
+    if (upload_read == 3) return QD_ERR_CLOSED;
+    const upload_test_frame *in = &upload_input[upload_read++];
+    if (in->len > cap) return QD_ERR_BUFFER;
+    *type = in->type;
+    *len = in->len;
+    if (*len) memcpy(body, in->body, *len);
+    return QD_OK;
+}
+
+static void test_upload_replacement_and_single_error(void)
+{
+    char dir[] = "/tmp/qd-upload-XXXXXX";
+    if (!mkdtemp(dir)) { CHECK(0); return; }
+    char source[128], key[128], pub[128];
+    snprintf(source, sizeof source, "%s/report.txt", dir);
+    snprintf(key, sizeof key, "%s/chris.key", dir);
+    snprintf(pub, sizeof pub, "%s/chris.pub", dir);
+    int rc = id_generate_keys("chris", dir);
+    CHECK(rc == QD_OK);
+    if (rc != QD_OK) goto cleanup;
+
+    server_conn conn = {.storage_dir = dir};
+    uint8_t meta[META_MAX];
+    char target[PATH_MAX] = "";
+    const char *versions[] = {"old!", "new!", "bad!", "bad!"};
+    for (size_t i = 0; i < 4; ++i) {
+        FILE *f = fopen(source, "wb");
+        CHECK(f != NULL);
+        if (!f) break;
+        CHECK(fwrite(versions[i], 1, 4, f) == 4);
+        CHECK(fclose(f) == 0);
+        size_t rlen, slen;
+        rc = id_make_record("chris", source, meta + 2, &rlen);
+        CHECK(rc == QD_OK);
+        if (rc != QD_OK) break;
+        rc = id_sign(key, meta + 2, rlen, meta + 4 + rlen, &slen);
+        CHECK(rc == QD_OK);
+        if (rc != QD_OK) break;
+        put_u16(meta, rlen);
+        put_u16(meta + 2 + rlen, slen);
+        file_record r;
+        if (!parse_meta(meta, 4 + rlen + slen, &r) ||
+            !object_path(&conn, &r, target)) { CHECK(0); break; }
+
+        upload_input[0] = (upload_test_frame){.type = QD_T_CHUNK, .len = i == 3 ? 13 : 10};
+        upload_input[1] = (upload_test_frame){.type = QD_T_CHUNK, .len = 10};
+        upload_input[2] = (upload_test_frame){.type = QD_T_UPLOAD_END};
+        put_u64(upload_input[0].body, i == 2 ? 1 : 0);
+        put_u64(upload_input[1].body, 2);
+        memcpy(upload_input[0].body + 8, versions[i], 2);
+        memcpy(upload_input[1].body + 8, versions[i] + 2, 2);
+        upload_read = upload_sent = 0;
+        CHECK(server_handle(&conn, QD_T_UPLOAD_BEGIN, meta, 4 + rlen + slen) == QD_OK);
+        CHECK(upload_read == 3);
+        CHECK(upload_sent == 1);
+        CHECK(upload_output[0].type == (i < 2 ? QD_T_OK : QD_T_ERROR));
+        if (i >= 2)
+            CHECK(upload_output[0].body[0] == (i == 2 ? QD_E_BAD_FORMAT : QD_E_SIZE_MISMATCH));
+
+        /* Download immediately: the only next replies should belong to it. */
+        uint8_t request[] = {5, 'c','h','r','i','s', 0, 10, 'r','e','p','o','r','t','.','t','x','t'};
+        upload_sent = 0;
+        CHECK(server_handle(&conn, QD_T_DOWNLOAD_REQUEST, request, sizeof request) == QD_OK);
+        CHECK(upload_sent == 3);
+        CHECK(upload_output[0].type == QD_T_UPLOAD_BEGIN);
+        CHECK(upload_output[1].type == QD_T_CHUNK && upload_output[1].len == 12);
+        CHECK(!memcmp(upload_output[1].body + 8, i == 0 ? "old!" : "new!", 4));
+        CHECK(upload_output[2].type == QD_T_UPLOAD_END);
+    }
+    if (target[0]) {
+        char path[PATH_MAX + 6];
+        snprintf(path, sizeof path, "%s/data", target); unlink(path);
+        snprintf(path, sizeof path, "%s/meta", target); unlink(path);
+        rmdir(target);
+    }
+cleanup:
+    unlink(source); unlink(key); unlink(pub);
+    CHECK(rmdir(dir) == 0); /* also catches leaked staging/backup directories */
+}
+
 int main(void)
 {
     test_byte_order();
@@ -390,6 +504,7 @@ int main(void)
     test_reading_filenames();
     test_reading_file();
     test_wire_cost();
+    test_upload_replacement_and_single_error();
 
     printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <openssl/sha.h>
@@ -147,40 +148,80 @@ static int object_path(server_conn *c, const file_record *r, char out[PATH_MAX])
     return n >= 0 && n < PATH_MAX - 6;
 }
 
+/* Publish only a fully checked upload. Preserve the old pair until
+ * the new directory has been installed. The server handles one client at a time. */
+static int publish_upload(const char *dir, const char *target)
+{
+    struct stat info;
+    if (lstat(target, &info) != 0)
+        return errno == ENOENT ? rename(dir, target) : -1;
+    if (!S_ISDIR(info.st_mode)) return -1;
+
+    char backup[PATH_MAX];
+    int n = snprintf(backup, sizeof backup, "%s.old-XXXXXX", dir);
+    if (n < 0 || (size_t)n >= sizeof backup || !mkdtemp(backup)) return -1;
+    if (rename(target, backup) != 0) {
+        rmdir(backup);
+        return -1;
+    }
+    if (rename(dir, target) != 0) {
+        if (rename(backup, target) != 0)
+            fprintf(stderr, "Could not restore previous upload; retained at %s\n", backup);
+        return -1;
+    }
+
+    char path[PATH_MAX + 6];
+    snprintf(path, sizeof path, "%s/data", backup);
+    unlink(path);
+    snprintf(path, sizeof path, "%s/meta", backup);
+    unlink(path);
+    rmdir(backup);
+    return 0;
+}
+
 static int handle_upload_begin(server_conn *c, const uint8_t *body, size_t len)
 {
     file_record r;
-    if (!parse_meta(body, len, &r))
-        return send_error(c, QD_E_BAD_FORMAT, "invalid upload record");
-
     char key_file[PATH_MAX], target[PATH_MAX];
     uint8_t key[QD_SIG_PK_BYTES];
-    int code = key_path(c, r.id, r.id_len, key_file);
-    if (!code) code = read_public_key(key_file, key);
-    if (code) return send_error(c, code, "uploader key unavailable");
-    if (!object_path(c, &r, target))
-        return send_error(c, QD_E_STORAGE, "invalid storage path");
-
     char dir[PATH_MAX], data[PATH_MAX + 6], meta[PATH_MAX + 6];
-    int n = snprintf(dir, sizeof dir, "%s/.incoming-XXXXXX", c->storage_dir);
-    if (n < 0 || (size_t)n >= sizeof dir || !mkdtemp(dir))
-        return send_error(c, QD_E_STORAGE, "cannot stage upload");
-    snprintf(data, sizeof data, "%s/data", dir);
-    snprintf(meta, sizeof meta, "%s/meta", dir);
-    FILE *file = fopen(data, "wb");
-    uint64_t total = 0;
-    int rc = QD_OK;
-    code = file ? 0 : QD_E_STORAGE;
+    FILE *file = NULL;
+    int staged = 0;
+    int code = 0;
 
-    /* Receive the whole upload here so a disconnect also cleans up. */
-    uint8_t chunk[8 + QD_CHUNK_MAX];
-    while (!code) {
+    if (!parse_meta(body, len, &r)) {
+        code = QD_E_BAD_FORMAT;
+    } else {
+        code = key_path(c, r.id, r.id_len, key_file);
+        if (!code) code = read_public_key(key_file, key);
+        if (!code && !object_path(c, &r, target)) code = QD_E_STORAGE;
+    }
+    if (!code) {
+        int n = snprintf(dir, sizeof dir, "%s/.incoming-XXXXXX", c->storage_dir);
+        if (n < 0 || (size_t)n >= sizeof dir || !mkdtemp(dir)) {
+            code = QD_E_STORAGE;
+        } else {
+            staged = 1;
+            snprintf(data, sizeof data, "%s/data", dir);
+            snprintf(meta, sizeof meta, "%s/meta", dir);
+            file = fopen(data, "wb");
+            if (!file) code = QD_E_STORAGE;
+        }
+    }
+
+    uint64_t total = 0;
+    int rc;
+    /* Keep the first error and consume this upload before replying. */
+    uint8_t chunk[QD_BODY_MAX];
+    for (;;) {
         uint8_t type;
         size_t bytes;
         rc = sec_recv(c->s, &type, chunk, sizeof chunk, &bytes);
         if (rc != QD_OK) break;
         if (type == QD_T_UPLOAD_END && !bytes) break;
-        if (type != QD_T_CHUNK || bytes <= 8 || get_u64(chunk) != total) {
+        if (code) continue;
+        if (type != QD_T_CHUNK || bytes <= 8 ||
+            bytes > 8 + QD_CHUNK_MAX || get_u64(chunk) != total) {
             code = QD_E_BAD_FORMAT;
         } else if (bytes - 8 > r.size - total) {
             code = QD_E_SIZE_MISMATCH;
@@ -205,11 +246,11 @@ static int handle_upload_begin(server_conn *c, const uint8_t *body, size_t len)
         if (!file) code = QD_E_STORAGE;
         else {
             int saved = fwrite(body, 1, len, file) == len;
-            if (fclose(file) != 0 || !saved || rename(dir, target) != 0)
+            if (fclose(file) != 0 || !saved || publish_upload(dir, target) != 0)
                 code = QD_E_STORAGE;
         }
     }
-    if (code || rc != QD_OK) {
+    if (staged && (code || rc != QD_OK)) {
         unlink(data);
         unlink(meta);
         rmdir(dir);
