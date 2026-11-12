@@ -8,6 +8,8 @@
 #include "reading.h"
 #include "securenet.h"
 #include "wire_cost.h"
+#include <stdlib.h>
+#include <sys/stat.h>
 
 #include <oqs/oqs.h>
 #include <stdio.h>
@@ -127,19 +129,131 @@ static void test_bench_clock(void)
 
 static void test_identity_contract_sizes(void)
 {
-    uint8_t sig[QD_SIG_BYTES], rec[QD_RECORD_MAX], pk[QD_SIG_PK_BYTES] = {0};
-    size_t sig_len = 0, rec_len = 0;
-    const uint8_t msg[] = "hello";
+    /* Make a temporary folder for the test files. */
+    char dir[] = "/tmp/qd_identity_XXXXXX";
+    CHECK(mkdtemp(dir) != NULL);
 
-    CHECK(id_sign("keys/test.key", msg, sizeof msg, sig, &sig_len) == QD_OK);
+    char key[256];
+    char pub[256];
+    char data[256];
+
+    snprintf(key,  sizeof(key),  "%s/alice.key", dir);
+    snprintf(pub,  sizeof(pub),  "%s/alice.pub", dir);
+    snprintf(data, sizeof(data), "%s/notes.txt", dir);
+
+    /* Test key generation and invalid usernames. */
+    CHECK(id_generate_keys("alice", dir) == QD_OK);
+    CHECK(id_generate_keys("alice", dir) == QD_ERR_FILE);
+    CHECK(id_generate_keys("../bad", dir) == QD_ERR_ARG);
+    CHECK(id_generate_keys(".", dir) == QD_ERR_ARG);
+    CHECK(id_generate_keys("", dir) == QD_ERR_ARG);
+
+    /* Check the private-key file permissions. */
+    struct stat st;
+    CHECK(stat(key, &st) == 0 && (st.st_mode & 0777) == 0600);
+
+    uint8_t pk[QD_SIG_PK_BYTES];
+    uint8_t sig[QD_SIG_BYTES];
+    uint8_t hash[QD_SHA256_BYTES];
+    uint8_t rec[QD_RECORD_MAX];
+
+    /* Read the public key. */
+    FILE *f = fopen(pub, "rb");
+    CHECK(f != NULL);
+
+    if (f == NULL) {
+        return;
+    }
+
+    CHECK(fread(pk, 1, sizeof(pk), f) == sizeof(pk));
+    CHECK(fclose(f) == 0);
+
+    /* Sign and verify a message. */
+    uint8_t msg[] = "hello";
+    size_t sig_len = 0;
+    size_t rec_len = 0;
+
+    CHECK(id_sign(key, msg, sizeof(msg), sig, &sig_len) == QD_OK);
     CHECK(sig_len == QD_SIG_BYTES);
-    CHECK(id_verify(pk, msg, sizeof msg, sig, sig_len) == QD_OK);
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_OK);
 
-    CHECK(id_make_record("alice", "notes.txt", rec, &rec_len) == QD_OK);
+    /* Change the message: verification should fail. */
+    msg[0] ^= 1;
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* Restore the message, then change the signature. */
+    msg[0] ^= 1;
+    sig[0] ^= 1;
+    CHECK(id_verify(pk, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+    sig[0] ^= 1;
+
+    /* The wrong public key should also fail. */
+    uint8_t wrong[QD_SIG_PK_BYTES] = {0};
+    CHECK(id_verify(wrong, msg, sizeof(msg), sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* A missing private-key file should return an error. */
+    CHECK(id_sign("/no/such/key", msg, sizeof(msg), sig, &sig_len)
+          == QD_ERR_FILE);
+
+    /* Create a real file for the hash and record tests. */
+    f = fopen(data, "wb");
+    CHECK(f != NULL);
+
+    if (f == NULL) {
+        return;
+    }
+
+    CHECK(fwrite("abc", 1, 3, f) == 3);
+    CHECK(fclose(f) == 0);
+
+    /* Known SHA-256 fingerprint for the text "abc". */
+    static const uint8_t expected[32] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
+    };
+
+    CHECK(id_hash_file(data, hash) == QD_OK);
+    CHECK(memcmp(hash, expected, sizeof(expected)) == 0);
+
+    /* Build the upload record and check its information. */
+    CHECK(id_make_record("alice", data, rec, &rec_len) == QD_OK);
     CHECK(rec_len == 1 + 1 + 5 + 2 + 9 + 8 + 32 + 8);
+
     CHECK(rec[0] == QD_RECORD_VERSION && rec[1] == 5);
     CHECK(memcmp(rec + 2, "alice", 5) == 0);
     CHECK(get_u16(rec + 7) == 9);
+    CHECK(memcmp(rec + 9, "notes.txt", 9) == 0);
+    CHECK(get_u64(rec + 18) == 3);
+    CHECK(memcmp(rec + 26, expected, 32) == 0);
+
+    /* Sign the record, then check that changing it is caught. */
+    CHECK(id_sign(key, rec, rec_len, sig, &sig_len) == QD_OK);
+    CHECK(id_verify(pk, rec, rec_len, sig, sig_len) == QD_OK);
+
+    rec[26] ^= 1;
+    CHECK(id_verify(pk, rec, rec_len, sig, sig_len) == QD_ERR_CRYPTO);
+
+    /* Change the file and check that its fingerprint changes. */
+    f = fopen(data, "wb");
+    CHECK(f != NULL);
+
+    if (f != NULL) {
+        CHECK(fwrite("abd", 1, 3, f) == 3);
+        CHECK(fclose(f) == 0);
+    }
+
+    CHECK(id_hash_file(data, hash) == QD_OK);
+    CHECK(memcmp(hash, expected, 32) != 0);
+    CHECK(id_hash_file("/no/such/file", hash) == QD_ERR_FILE);
+    CHECK(id_make_record("../alice", data, rec, &rec_len) == QD_ERR_ARG);
+
+    /* Remove the temporary test files. */
+    unlink(key);
+    unlink(pub);
+    unlink(data);
+    rmdir(dir);
 }
 
 static int parse_str(const char *s, reading *r)
@@ -263,6 +377,120 @@ static void test_wire_cost(void)
     CHECK(wire_register_c2s(10) == 22 + 1 + 10 + 2 + 1952);
 }
 
+/* Exercise the real handlers with a scripted transport. Include the handler
+ * source so the existing test target can substitute only sec_send/sec_recv. */
+static int upload_test_send(sec_session *, uint8_t, const uint8_t *, size_t);
+static int upload_test_recv(sec_session *, uint8_t *, uint8_t *, size_t, size_t *);
+#define sec_send upload_test_send
+#define sec_recv upload_test_recv
+#include "../server/handlers.c"
+#undef sec_send
+#undef sec_recv
+
+typedef struct {
+    uint8_t type;
+    size_t len;
+    uint8_t body[32];
+} upload_test_frame;
+static upload_test_frame upload_input[3], upload_output[4];
+static size_t upload_read, upload_sent;
+
+static int upload_test_send(sec_session *s, uint8_t type, const uint8_t *body, size_t len)
+{
+    (void)s;
+    if (upload_sent >= 4) return QD_ERR_BUFFER;
+    upload_test_frame *out = &upload_output[upload_sent++];
+    out->type = type;
+    out->len = len;
+    size_t copy = len < sizeof out->body ? len : sizeof out->body;
+    if (copy) memcpy(out->body, body, copy);
+    return QD_OK;
+}
+
+static int upload_test_recv(sec_session *s, uint8_t *type, uint8_t *body,
+                            size_t cap, size_t *len)
+{
+    (void)s;
+    if (upload_read == 3) return QD_ERR_CLOSED;
+    const upload_test_frame *in = &upload_input[upload_read++];
+    if (in->len > cap) return QD_ERR_BUFFER;
+    *type = in->type;
+    *len = in->len;
+    if (*len) memcpy(body, in->body, *len);
+    return QD_OK;
+}
+
+static void test_upload_replacement_and_single_error(void)
+{
+    char dir[] = "/tmp/qd-upload-XXXXXX";
+    if (!mkdtemp(dir)) { CHECK(0); return; }
+    char source[128], key[128], pub[128];
+    snprintf(source, sizeof source, "%s/report.txt", dir);
+    snprintf(key, sizeof key, "%s/chris.key", dir);
+    snprintf(pub, sizeof pub, "%s/chris.pub", dir);
+    int rc = id_generate_keys("chris", dir);
+    CHECK(rc == QD_OK);
+    if (rc != QD_OK) goto cleanup;
+
+    server_conn conn = {.storage_dir = dir};
+    uint8_t meta[META_MAX];
+    char target[PATH_MAX] = "";
+    const char *versions[] = {"old!", "new!", "bad!", "bad!"};
+    for (size_t i = 0; i < 4; ++i) {
+        FILE *f = fopen(source, "wb");
+        CHECK(f != NULL);
+        if (!f) break;
+        CHECK(fwrite(versions[i], 1, 4, f) == 4);
+        CHECK(fclose(f) == 0);
+        size_t rlen, slen;
+        rc = id_make_record("chris", source, meta + 2, &rlen);
+        CHECK(rc == QD_OK);
+        if (rc != QD_OK) break;
+        rc = id_sign(key, meta + 2, rlen, meta + 4 + rlen, &slen);
+        CHECK(rc == QD_OK);
+        if (rc != QD_OK) break;
+        put_u16(meta, rlen);
+        put_u16(meta + 2 + rlen, slen);
+        file_record r;
+        if (!parse_meta(meta, 4 + rlen + slen, &r) ||
+            !object_path(&conn, &r, target)) { CHECK(0); break; }
+
+        upload_input[0] = (upload_test_frame){.type = QD_T_CHUNK, .len = i == 3 ? 13 : 10};
+        upload_input[1] = (upload_test_frame){.type = QD_T_CHUNK, .len = 10};
+        upload_input[2] = (upload_test_frame){.type = QD_T_UPLOAD_END};
+        put_u64(upload_input[0].body, i == 2 ? 1 : 0);
+        put_u64(upload_input[1].body, 2);
+        memcpy(upload_input[0].body + 8, versions[i], 2);
+        memcpy(upload_input[1].body + 8, versions[i] + 2, 2);
+        upload_read = upload_sent = 0;
+        CHECK(server_handle(&conn, QD_T_UPLOAD_BEGIN, meta, 4 + rlen + slen) == QD_OK);
+        CHECK(upload_read == 3);
+        CHECK(upload_sent == 1);
+        CHECK(upload_output[0].type == (i < 2 ? QD_T_OK : QD_T_ERROR));
+        if (i >= 2)
+            CHECK(upload_output[0].body[0] == (i == 2 ? QD_E_BAD_FORMAT : QD_E_SIZE_MISMATCH));
+
+        /* Download immediately: the only next replies should belong to it. */
+        uint8_t request[] = {5, 'c','h','r','i','s', 0, 10, 'r','e','p','o','r','t','.','t','x','t'};
+        upload_sent = 0;
+        CHECK(server_handle(&conn, QD_T_DOWNLOAD_REQUEST, request, sizeof request) == QD_OK);
+        CHECK(upload_sent == 3);
+        CHECK(upload_output[0].type == QD_T_UPLOAD_BEGIN);
+        CHECK(upload_output[1].type == QD_T_CHUNK && upload_output[1].len == 12);
+        CHECK(!memcmp(upload_output[1].body + 8, i == 0 ? "old!" : "new!", 4));
+        CHECK(upload_output[2].type == QD_T_UPLOAD_END);
+    }
+    if (target[0]) {
+        char path[PATH_MAX + 6];
+        snprintf(path, sizeof path, "%s/data", target); unlink(path);
+        snprintf(path, sizeof path, "%s/meta", target); unlink(path);
+        rmdir(target);
+    }
+cleanup:
+    unlink(source); unlink(key); unlink(pub);
+    CHECK(rmdir(dir) == 0); /* also catches leaked staging/backup directories */
+}
+
 int main(void)
 {
     test_byte_order();
@@ -276,6 +504,7 @@ int main(void)
     test_reading_filenames();
     test_reading_file();
     test_wire_cost();
+    test_upload_replacement_and_single_error();
 
     printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
