@@ -2,9 +2,9 @@
  * (sensor/reading.h), groups them into files of `batch` readings, signs each file,
  * and reports how many bytes each upload puts on the wire.
  *
- * Today: signing uses Chris's identity stubs (fake signature of the real length)
- * and byte counts are computed from PROTOCOL.md (sensor/wire_cost.h), because the
- * secure pipe is still a stub. The files themselves are real.
+ * Signing is real ML-DSA-65 (Chris's identity code); a key pair is made in keys/
+ * on first run. Byte counts are computed from PROTOCOL.md (sensor/wire_cost.h),
+ * not counted on a socket.
  *
  * Usage: sensor <id> [count] [batch] [outdir]
  *   count   readings to make (default 10)
@@ -111,6 +111,21 @@ int main(int argc, char **argv)
     if (!getcwd(cwd, sizeof cwd)) { perror("getcwd"); return 1; }
     snprintf(key_path, sizeof key_path, "%s/keys/%s.key", cwd, id);
 
+    /* Real ML-DSA-65 signing needs a key pair: make one the first time this sensor runs. */
+    if (access(key_path, F_OK) != 0) {
+        char key_dir[PATH_MAX + 8];
+        snprintf(key_dir, sizeof key_dir, "%s/keys", cwd);
+        if (mkdir(key_dir, 0700) != 0 && errno != EEXIST) {
+            fprintf(stderr, "cannot make %s: %s\n", key_dir, strerror(errno));
+            return 1;
+        }
+        int rc = id_generate_keys(id, key_dir);
+        if (rc != QD_OK) {
+            fprintf(stderr, "cannot make keys for %s: %s\n", id, qd_strerror(rc));
+            return 1;
+        }
+    }
+
     /* Work inside outdir so the signed record holds only the file name, never a
      * folder path (PROTOCOL.md 6.1 forbids '/' in file names). */
     if (mkdir(outdir, 0755) != 0 && errno != EEXIST) {
@@ -165,7 +180,7 @@ int main(int argc, char **argv)
     printf("  replies, server to sensor     %10llu B\n", (unsigned long long)s2c);
     printf("  connection setup, once        %10llu B to server, %llu B back (handshake + register)\n",
            (unsigned long long)setup_c2s, (unsigned long long)setup_s2c);
-    printf("  (byte counts computed from PROTOCOL.md; securenet and identity are stubs)\n");
+    printf("  (byte counts computed from PROTOCOL.md; real ML-DSA-65 signatures)\n");
 
     bench_log("batch_size", (uint64_t)batch, "readings");
     bench_log("readings", (uint64_t)count, "readings");
