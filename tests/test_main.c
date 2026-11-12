@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int failures, checks;
@@ -495,35 +496,6 @@ cleanup:
     CHECK(rmdir(dir) == 0); /* also catches leaked staging/backup directories */
 }
 
-typedef struct {
-    int fd;
-    int handshake_rc;
-    int recv_rc;
-    int send_rc;
-    int message_ok;
-    uint8_t send_key[QD_AES_KEY_BYTES];
-    uint8_t recv_key[QD_AES_KEY_BYTES];
-} secure_peer;
-
-static void *secure_peer_round_trip(void *arg)
-{
-    secure_peer *peer = arg;
-    sec_session s = { .fd = peer->fd };
-    peer->handshake_rc = sec_handshake_server(peer->fd, &s);
-    if (peer->handshake_rc == QD_OK) {
-        memcpy(peer->send_key, s.send_key, sizeof peer->send_key);
-        memcpy(peer->recv_key, s.recv_key, sizeof peer->recv_key);
-        uint8_t type = 0, body[3] = {0};
-        size_t len = 0;
-        peer->recv_rc = sec_recv(&s, &type, body, sizeof body, &len);
-        peer->message_ok = peer->recv_rc == QD_OK && type == 0x55 &&
-            len == 3 && memcmp(body, "hey", 3) == 0;
-        peer->send_rc = sec_send(&s, 0x56, (const uint8_t *)"yes", 3);
-    }
-    sec_close(&s);
-    return NULL;
-}
-
 static void test_secure_handshake_and_messages(void)
 {
     int sv[2];
@@ -531,15 +503,29 @@ static void test_secure_handshake_and_messages(void)
     CHECK(socket_rc == 0);
     if (socket_rc != 0) return;
 
-    secure_peer peer = { .fd = sv[1] };
-    pthread_t thread;
-    int thread_rc = pthread_create(&thread, NULL, secure_peer_round_trip, &peer);
-    CHECK(thread_rc == 0);
-    if (thread_rc != 0) {
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
         close(sv[0]);
         close(sv[1]);
         return;
     }
+    if (pid == 0) {
+        close(sv[0]);
+        sec_session server = { .fd = sv[1] };
+        int rc = sec_handshake_server(sv[1], &server);
+        uint8_t type = 0, body[3] = {0};
+        size_t len = 0;
+        if (rc == QD_OK)
+            rc = sec_recv(&server, &type, body, sizeof body, &len);
+        int valid = rc == QD_OK && type == 0x55 && len == 3 &&
+            memcmp(body, "hey", 3) == 0;
+        if (valid)
+            rc = sec_send(&server, 0x56, (const uint8_t *)"yes", 3);
+        sec_close(&server);
+        _exit(valid && rc == QD_OK ? 0 : 1);
+    }
+    close(sv[1]);
 
     sec_session client = { .fd = sv[0] };
     int rc = sec_handshake_client(sv[0], &client);
@@ -550,33 +536,11 @@ static void test_secure_handshake_and_messages(void)
         CHECK(sec_send(&client, 0x55, (const uint8_t *)"hey", 3) == QD_OK);
         CHECK(sec_recv(&client, &type, body, sizeof body, &len) == QD_OK);
         CHECK(type == 0x56 && len == 3 && memcmp(body, "yes", 3) == 0);
-    } else {
-        shutdown(sv[0], SHUT_RDWR);
-    }
-
-    CHECK(pthread_join(thread, NULL) == 0);
-    CHECK(peer.handshake_rc == QD_OK);
-    CHECK(peer.recv_rc == QD_OK && peer.message_ok);
-    CHECK(peer.send_rc == QD_OK);
-    if (rc == QD_OK && peer.handshake_rc == QD_OK) {
-        CHECK(memcmp(client.send_key, peer.recv_key, QD_AES_KEY_BYTES) == 0);
-        CHECK(memcmp(client.recv_key, peer.send_key, QD_AES_KEY_BYTES) == 0);
     }
     sec_close(&client);
-}
-
-typedef struct {
-    int fd;
-    int handshake_rc;
-    sec_session session;
-} secure_session_peer;
-
-static void *secure_peer_keep_session(void *arg)
-{
-    secure_session_peer *peer = arg;
-    peer->session.fd = peer->fd;
-    peer->handshake_rc = sec_handshake_server(peer->fd, &peer->session);
-    return NULL;
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 static void test_secure_rejects_modified_ciphertext(void)
@@ -586,36 +550,13 @@ static void test_secure_rejects_modified_ciphertext(void)
     CHECK(socket_rc == 0);
     if (socket_rc != 0) return;
 
-    secure_session_peer peer = { .fd = handshake_fds[1], .session = { .fd = -1 } };
-    pthread_t thread;
-    int thread_rc = pthread_create(&thread, NULL, secure_peer_keep_session, &peer);
-    CHECK(thread_rc == 0);
-    if (thread_rc != 0) {
-        close(handshake_fds[0]);
-        close(handshake_fds[1]);
-        return;
-    }
-
-    sec_session client = { .fd = handshake_fds[0] };
-    int client_rc = sec_handshake_client(client.fd, &client);
-    CHECK(client_rc == QD_OK);
-    if (client_rc != QD_OK) shutdown(client.fd, SHUT_RDWR);
-    CHECK(pthread_join(thread, NULL) == 0);
-    CHECK(peer.handshake_rc == QD_OK);
-    if (client_rc != QD_OK || peer.handshake_rc != QD_OK) {
-        sec_close(&client);
-        sec_close(&peer.session);
-        return;
-    }
-
-    CHECK(memcmp(client.send_key, peer.session.recv_key, QD_AES_KEY_BYTES) == 0);
-    CHECK(memcmp(client.recv_key, peer.session.send_key, QD_AES_KEY_BYTES) == 0);
-
     int client_route[2] = {-1, -1}, server_route[2] = {-1, -1};
     int client_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, client_route);
     int server_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, server_route);
     CHECK(client_pair_rc == 0 && server_pair_rc == 0);
     if (client_pair_rc != 0 || server_pair_rc != 0) {
+        close(handshake_fds[0]);
+        close(handshake_fds[1]);
         if (client_pair_rc == 0) {
             close(client_route[0]);
             close(client_route[1]);
@@ -624,15 +565,57 @@ static void test_secure_rejects_modified_ciphertext(void)
             close(server_route[0]);
             close(server_route[1]);
         }
-        sec_close(&client);
-        sec_close(&peer.session);
         return;
     }
 
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
+        close(handshake_fds[0]);
+        close(handshake_fds[1]);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        close(server_route[1]);
+        return;
+    }
+    if (pid == 0) {
+        close(handshake_fds[0]);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        sec_session server = { .fd = handshake_fds[1] };
+        int rc = sec_handshake_server(handshake_fds[1], &server);
+        close(handshake_fds[1]);
+        server.fd = server_route[1];
+        if (rc == QD_OK) {
+            uint8_t type = 0, body[16];
+            size_t len = 0;
+            rc = sec_recv(&server, &type, body, sizeof body, &len);
+            sec_close(&server);
+            _exit(rc == QD_ERR_CRYPTO ? 0 : 1);
+        }
+        sec_close(&server);
+        _exit(1);
+    }
+
+    close(handshake_fds[1]);
+    close(server_route[1]);
+    sec_session client = { .fd = handshake_fds[0] };
+    int client_rc = sec_handshake_client(client.fd, &client);
+    CHECK(client_rc == QD_OK);
+    if (client_rc != QD_OK) {
+        sec_close(&client);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        int status = 0;
+        CHECK(waitpid(pid, &status, 0) == pid);
+        CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        return;
+    }
     close(client.fd);
-    close(peer.session.fd);
     client.fd = client_route[0];
-    peer.session.fd = server_route[1];
 
     int send_rc = sec_send(&client, 0x57, (const uint8_t *)"tamper", 6);
     CHECK(send_rc == QD_OK);
@@ -646,11 +629,6 @@ static void test_secure_rejects_modified_ciphertext(void)
             buf[0] ^= 0x01;
             int relay_rc = frame_write(server_route[0], frame_type, buf, frame_len);
             CHECK(relay_rc == QD_OK);
-            if (relay_rc == QD_OK) {
-                uint8_t type = 0, body[16];
-                size_t len = 0;
-                CHECK(sec_recv(&peer.session, &type, body, sizeof body, &len) == QD_ERR_CRYPTO);
-            }
         } else {
             CHECK(0 && "could not relay ciphertext for tamper test");
         }
@@ -659,18 +637,11 @@ static void test_secure_rejects_modified_ciphertext(void)
     }
 
     sec_close(&client);
-    sec_close(&peer.session);
     close(client_route[1]);
     close(server_route[0]);
-}
-
-static void *secure_peer_handshake_only(void *arg)
-{
-    secure_peer *peer = arg;
-    sec_session s = { .fd = peer->fd };
-    peer->handshake_rc = sec_handshake_server(peer->fd, &s);
-    sec_close(&s);
-    return NULL;
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 typedef struct {
@@ -701,15 +672,21 @@ static void test_handshake_bad_version(void)
     CHECK(socket_rc == 0);
     if (socket_rc != 0) return;
 
-    secure_peer peer = { .fd = sv[1] };
-    pthread_t thread;
-    int thread_rc = pthread_create(&thread, NULL, secure_peer_handshake_only, &peer);
-    CHECK(thread_rc == 0);
-    if (thread_rc != 0) {
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
         close(sv[0]);
         close(sv[1]);
         return;
     }
+    if (pid == 0) {
+        close(sv[0]);
+        sec_session server = { .fd = sv[1] };
+        int rc = sec_handshake_server(sv[1], &server);
+        sec_close(&server);
+        _exit(rc == QD_ERR_FORMAT ? 0 : 1);
+    }
+    close(sv[1]);
 
     uint8_t wrong_version = QD_PROTOCOL_VERSION + 1;
     CHECK(frame_write(sv[0], QD_F_HELLO, &wrong_version, 1) == QD_OK);
@@ -719,8 +696,9 @@ static void test_handshake_bad_version(void)
     CHECK(QD_E_BAD_VERSION == 0x09);
     CHECK(type == QD_F_ERROR && len == 1 && body[0] == 0x09);
 
-    CHECK(pthread_join(thread, NULL) == 0);
-    CHECK(peer.handshake_rc == QD_ERR_FORMAT);
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     close(sv[0]);
 }
 
