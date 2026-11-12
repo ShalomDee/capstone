@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -146,6 +147,12 @@ int main(int argc, char **argv)
     uint64_t data = 0, c2s = 0, s2c = 0;
     size_t sig_total = 0;
 
+    /* CPU time (user + system) and wall time for making, checking and signing
+     * every file; key generation above is not included. */
+    struct rusage ru0, ru1;
+    getrusage(RUSAGE_SELF, &ru0);
+    uint64_t wall0 = bench_now_ns();
+
     for (long done = 0; done < count; done += batch) {
         size_t n = (size_t)(count - done < batch ? count - done : batch);
         char name[QD_NAME_MAX + 1];
@@ -167,6 +174,12 @@ int main(int argc, char **argv)
                    name, n, (unsigned long long)file_size, rec_len, sig_len, (unsigned long long)up);
     }
 
+    uint64_t wall_ns = bench_now_ns() - wall0;
+    getrusage(RUSAGE_SELF, &ru1);
+    uint64_t cpu_ns =
+        (uint64_t)((ru1.ru_utime.tv_sec - ru0.ru_utime.tv_sec) + (ru1.ru_stime.tv_sec - ru0.ru_stime.tv_sec)) * 1000000000ull +
+        (uint64_t)(((ru1.ru_utime.tv_usec - ru0.ru_utime.tv_usec) + (ru1.ru_stime.tv_usec - ru0.ru_stime.tv_usec)) * 1000);
+
     uint64_t setup_c2s = wire_handshake_c2s() + wire_register_c2s(strlen(id));
     uint64_t setup_s2c = wire_handshake_s2c() + wire_register_s2c();
     printf("sensor %s: %ld readings in %ld file%s of up to %ld (in %s/)\n",
@@ -181,6 +194,9 @@ int main(int argc, char **argv)
     printf("  connection setup, once        %10llu B to server, %llu B back (handshake + register)\n",
            (unsigned long long)setup_c2s, (unsigned long long)setup_s2c);
     printf("  (byte counts computed from PROTOCOL.md; real ML-DSA-65 signatures)\n");
+    printf("  CPU time, make + check + sign %10.1f us per reading (%.1f us wall)\n",
+           cpu_ns / 1e3 / count, wall_ns / 1e3 / count);
+    printf("  peak memory (max RSS)         %10ld KiB\n", ru1.ru_maxrss);
 
     bench_log("batch_size", (uint64_t)batch, "readings");
     bench_log("readings", (uint64_t)count, "readings");
@@ -191,6 +207,9 @@ int main(int argc, char **argv)
     bench_log("signature_bytes", sig_total, "B");
     bench_log("setup_c2s_bytes", setup_c2s, "B");
     bench_log("setup_s2c_bytes", setup_s2c, "B");
+    bench_log("cpu_ns", cpu_ns, "ns");
+    bench_log("wall_ns", wall_ns, "ns");
+    bench_log("peak_rss_kib", (uint64_t)ru1.ru_maxrss, "KiB");
 
     free(buf);
     free(check);
