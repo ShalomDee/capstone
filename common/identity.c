@@ -1,12 +1,10 @@
-/* STUB. Chris replaces the body of every function with the real code.
- * The stubs return fake values of the correct SIZE, so size measurements and
- * the command loop can be built before the real crypto lands.
- * WARNING: the id_verify stub accepts any signature of the right length. */
+/* User keys, signatures, file hashes, and upload records. */
+
 #include "identity.h"
 #include "framing.h"
 #include "protocol.h"
 
-/*Adding these in to be able to call for these things*/
+/* Libraries needed for files, text, keys, hashes, and time. */
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -15,11 +13,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <oqs/oqs.h>
+#include <openssl/evp.h>
+#include <time.h>
 
-
-
-
-#include <string.h>
 
 /* Save one key without replacing an existing file. */
 static int save_key(const char *name,
@@ -159,44 +155,277 @@ int id_generate_keys(const char *id, const char *dir)
     return result;
 }
 
-int id_sign(const char *key_path, const uint8_t *msg, size_t n, uint8_t *sig, size_t *sig_len)
+
+/* Sign a message using the user's saved private key. */
+int id_sign(const char *key_path, const uint8_t *msg, size_t n,
+            uint8_t *sig, size_t *sig_len)
 {
-    (void)key_path; (void)msg; (void)n;
-    if (!sig || !sig_len) return QD_ERR_ARG;
-    memset(sig, 0xAB, QD_SIG_BYTES);                /* fake signature, real length */
-    *sig_len = QD_SIG_BYTES;
+    /* STEP 1: Check the inputs and open the private-key file. */
+    if (key_path == NULL || (msg == NULL && n != 0) ||
+        sig == NULL || sig_len == NULL) {
+        return QD_ERR_ARG;
+    }
+
+    *sig_len = 0;
+
+    FILE *key_file = fopen(key_path, "rb");
+
+    if (key_file == NULL) {
+        return QD_ERR_FILE;
+    }
+
+    /* STEP 2: Read the key and make sure the file is the right size. */
+    uint8_t private_key[OQS_SIG_ml_dsa_65_length_secret_key];
+
+    size_t bytes_read = fread(private_key, 1, sizeof(private_key), key_file);
+
+    int extra_byte = fgetc(key_file);
+    int read_failed = ferror(key_file);
+    int close_failed = fclose(key_file);
+
+    if (bytes_read != sizeof(private_key) ||
+        extra_byte != EOF ||
+        read_failed != 0 ||
+        close_failed != 0) {
+        OQS_MEM_cleanse(private_key, sizeof(private_key));
+        return QD_ERR_FILE;
+    }
+
+    /* STEP 3: Prepare the signature tool. */
+    OQS_SIG *algorithm = OQS_SIG_new(OQS_SIG_alg_ml_dsa_65);
+
+    if (algorithm == NULL) {
+        OQS_MEM_cleanse(private_key, sizeof(private_key));
+        return QD_ERR_CRYPTO;
+    }
+
+    /* An empty message is allowed when no message pointer was given. */
+    static const uint8_t empty_message = 0;
+
+    if (msg == NULL) {
+        msg = &empty_message;
+    }
+
+    /* STEP 4: Sign, then clear the temporary private key from memory. */
+    int sign_result = OQS_SIG_sign(
+        algorithm,
+        sig,
+        sig_len,
+        msg,
+        n,
+        private_key
+    );
+
+    OQS_MEM_cleanse(private_key, sizeof(private_key));
+    OQS_SIG_free(algorithm);
+
+    if (sign_result != OQS_SUCCESS || *sig_len != QD_SIG_BYTES) {
+        *sig_len = 0;
+        return QD_ERR_CRYPTO;
+    }
+
     return QD_OK;
 }
 
-int id_verify(const uint8_t *pk, const uint8_t *msg, size_t n, const uint8_t *sig, size_t sig_len)
+
+/* Check a signature using the user's public key. */
+int id_verify(const uint8_t *pk, const uint8_t *msg, size_t n,
+              const uint8_t *sig, size_t sig_len)
 {
-    (void)pk; (void)msg; (void)n; (void)sig;
-    return sig_len == QD_SIG_BYTES ? QD_OK : QD_ERR_CRYPTO;   /* fake: length check only */
+    /* STEP 1: Check the inputs and signature size. */
+    if (pk == NULL || (msg == NULL && n != 0) || sig == NULL) {
+        return QD_ERR_ARG;
+    }
+
+    if (sig_len != QD_SIG_BYTES) {
+        return QD_ERR_CRYPTO;
+    }
+
+    /* STEP 2: Prepare the same signature tool used to sign. */
+    OQS_SIG *algorithm = OQS_SIG_new(OQS_SIG_alg_ml_dsa_65);
+
+    if (algorithm == NULL) {
+        return QD_ERR_CRYPTO;
+    }
+
+    static const uint8_t empty_message = 0;
+
+    if (msg == NULL) {
+        msg = &empty_message;
+    }
+
+    /* STEP 3: Check the signature using the public key. */
+    int check_result = OQS_SIG_verify(
+        algorithm,
+        msg,
+        n,
+        sig,
+        sig_len,
+        pk
+    );
+
+    OQS_SIG_free(algorithm);
+
+    if (check_result != OQS_SUCCESS) {
+        return QD_ERR_CRYPTO;
+    }
+
+    return QD_OK;
 }
 
+
+/* Create a SHA-256 fingerprint for a file. */
 int id_hash_file(const char *path, uint8_t out[32])
 {
-    (void)path;
-    memset(out, 0, QD_SHA256_BYTES);                /* fake hash */
-    return QD_OK;
+    /* STEP 1: Check the inputs and open the file. */
+    if (path == NULL || out == NULL) {
+        return QD_ERR_ARG;
+    }
+
+    FILE *file = fopen(path, "rb");
+
+    if (file == NULL) {
+        return QD_ERR_FILE;
+    }
+
+    /* STEP 2: Prepare OpenSSL's SHA-256 fingerprint tool. */
+    EVP_MD_CTX *hash_tool = EVP_MD_CTX_new();
+
+    if (hash_tool == NULL) {
+        fclose(file);
+        return QD_ERR_CRYPTO;
+    }
+
+    int result = QD_OK;
+
+    uint8_t file_piece[16384];
+    size_t bytes_read = 0;
+    unsigned int hash_size = 0;
+
+    if (EVP_DigestInit_ex(hash_tool, EVP_sha256(), NULL) != 1) {
+        result = QD_ERR_CRYPTO;
+    }
+
+    /* STEP 3: Feed the file to the tool one piece at a time. */
+    while (result == QD_OK &&
+           (bytes_read = fread(
+               file_piece,
+               1,
+               sizeof(file_piece),
+               file
+           )) != 0) {
+
+        if (EVP_DigestUpdate(hash_tool, file_piece, bytes_read) != 1) {
+            result = QD_ERR_CRYPTO;
+        }
+    }
+
+    if (result == QD_OK && ferror(file)) {
+        result = QD_ERR_FILE;
+    }
+
+    /* STEP 4: Finish the fingerprint and clean up. */
+    if (result == QD_OK) {
+        if (EVP_DigestFinal_ex(hash_tool, out, &hash_size) != 1 ||
+            hash_size != QD_SHA256_BYTES) {
+            result = QD_ERR_CRYPTO;
+        }
+    }
+
+    EVP_MD_CTX_free(hash_tool);
+
+    if (fclose(file) != 0) {
+        result = QD_ERR_FILE;
+    }
+
+    return result;
 }
 
-int id_make_record(const char *id, const char *file, uint8_t *rec, size_t *rec_len)
-{
-    /* Real layout, fake contents: file_size, hash and timestamp are all zero. */
-    if (!id || !file || !rec || !rec_len) return QD_ERR_ARG;
-    size_t id_len = strlen(id), name_len = strlen(file);
-    if (id_len < 1 || id_len > QD_ID_MAX || name_len < 1 || name_len > QD_NAME_MAX) return QD_ERR_ARG;
 
-    uint8_t *p = rec;
-    *p++ = QD_RECORD_VERSION;
-    *p++ = (uint8_t)id_len;
-    memcpy(p, id, id_len);       p += id_len;
-    put_u16(p, (uint16_t)name_len); p += 2;
-    memcpy(p, file, name_len);   p += name_len;
-    put_u64(p, 0);               p += 8;            /* file_size */
-    memset(p, 0, QD_SHA256_BYTES); p += QD_SHA256_BYTES;
-    put_u64(p, 0);               p += 8;            /* timestamp */
-    *rec_len = (size_t)(p - rec);
+/* Create the record that will be signed for an upload. */
+int id_make_record(const char *id, const char *file,
+                   uint8_t *rec, size_t *rec_len)
+{
+    /* STEP 1: Check the inputs and find the file's name. */
+    if (id == NULL || file == NULL || rec == NULL || rec_len == NULL) {
+        return QD_ERR_ARG;
+    }
+
+    const char *name = strrchr(file, '/');
+
+    if (name == NULL) {
+        name = file;
+    } else {
+        name = name + 1;
+    }
+
+    size_t id_len = strlen(id);
+    size_t name_len = strlen(name);
+
+    if (id_len == 0 || id_len > QD_ID_MAX ||
+        name_len == 0 || name_len > QD_NAME_MAX ||
+        strchr(id, '/') != NULL ||
+        strchr(id, '\\') != NULL ||
+        strcmp(id, ".") == 0 ||
+        strcmp(id, "..") == 0 ||
+        strchr(name, '\\') != NULL ||
+        strcmp(name, ".") == 0 ||
+        strcmp(name, "..") == 0) {
+        return QD_ERR_ARG;
+    }
+
+    /* STEP 2: Get the file size, fingerprint, and current time. */
+    struct stat file_info;
+
+    if (stat(file, &file_info) != 0 ||
+        !S_ISREG(file_info.st_mode) ||
+        file_info.st_size < 0) {
+        return QD_ERR_FILE;
+    }
+
+    uint8_t fingerprint[QD_SHA256_BYTES];
+
+    int result = id_hash_file(file, fingerprint);
+
+    if (result != QD_OK) {
+        return result;
+    }
+
+    time_t current_time = time(NULL);
+
+    if (current_time == (time_t)-1) {
+        return QD_ERR_FILE;
+    }
+
+    /* STEP 3: Put each part into the record in the agreed order. */
+    uint8_t *position = rec;
+
+    *position = QD_RECORD_VERSION;
+    position = position + 1;
+
+    *position = (uint8_t)id_len;
+    position = position + 1;
+
+    memcpy(position, id, id_len);
+    position = position + id_len;
+
+    put_u16(position, (uint16_t)name_len);
+    position = position + 2;
+
+    memcpy(position, name, name_len);
+    position = position + name_len;
+
+    put_u64(position, (uint64_t)file_info.st_size);
+    position = position + 8;
+
+    memcpy(position, fingerprint, sizeof(fingerprint));
+    position = position + sizeof(fingerprint);
+
+    put_u64(position, (uint64_t)current_time);
+    position = position + 8;
+
+    /* Report how many bytes the completed record uses. */
+    *rec_len = (size_t)(position - rec);
+
     return QD_OK;
 }

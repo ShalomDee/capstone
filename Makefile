@@ -12,9 +12,9 @@ HEADERS    = $(wildcard common/*.h)
 SENSOR_LIB = sensor/reading.c sensor/wire_cost.c
 SENSOR_HDR = sensor/reading.h sensor/wire_cost.h
 
-PROGRAMS = $(BUILD)/server $(BUILD)/client $(BUILD)/sensor $(BUILD)/time_sign $(BUILD)/time_pqc $(BUILD)/pqc_demo
+PROGRAMS = $(BUILD)/server $(BUILD)/client $(BUILD)/sensor $(BUILD)/time_sign $(BUILD)/time_pqc $(BUILD)/pqc_demo $(BUILD)/net_measure
 
-.PHONY: all demo test bench sensor-sizes clean
+.PHONY: all demo test bench sensor-sizes measure clean
 
 # "make" builds every program into build/
 all: $(PROGRAMS)
@@ -37,6 +37,11 @@ sensor-sizes: $(BUILD)/sensor
 	./$(BUILD)/sensor field-a-01 100 10 $(BUILD)/sensor-data
 	./$(BUILD)/sensor field-a-01 100 100 $(BUILD)/sensor-data
 
+# "make measure" runs every timing and byte measurement in one sitting (needs the
+# real secure pipe). Raw output goes to bench/results/<date>/, summary to docs/results/.
+measure: all
+	./scripts/run_measurements.sh
+
 $(BUILD)/common/%.o: common/%.c $(HEADERS) | $(BUILD)/common
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -54,6 +59,10 @@ $(BUILD)/time_sign: bench/time_sign.c $(COMMON_OBJ)
 
 $(BUILD)/time_pqc: bench/time_pqc.c | $(BUILD)
 	$(CC) $(CFLAGS) $< $(LDLIBS) -o $@
+
+# Counts the bytes it sends and receives by wrapping send() and recv() at link time.
+$(BUILD)/net_measure: bench/net_measure.c client/commands.c client/commands.h $(SENSOR_LIB) $(SENSOR_HDR) $(COMMON_OBJ)
+	$(CC) $(CFLAGS) -Iclient -Isensor bench/net_measure.c client/commands.c $(SENSOR_LIB) $(COMMON_OBJ) $(LDLIBS) -Wl,--wrap=send,--wrap=recv -o $@
 
 $(BUILD)/test_main: tests/test_main.c $(SENSOR_LIB) $(SENSOR_HDR) $(COMMON_OBJ)
 	$(CC) $(CFLAGS) -Isensor tests/test_main.c $(SENSOR_LIB) $(COMMON_OBJ) $(LDLIBS) -o $@

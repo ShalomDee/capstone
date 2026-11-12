@@ -2,7 +2,7 @@
  * docs/PROTOCOL.md. Owner: Shalom.
  *
  * These numbers are COMPUTED from real message body sizes, not captured from a
- * socket, because securenet is still a stub. Once Carvin's code lands, count the
+ * socket. Once Carvin's code is merged, count the
  * bytes sec_send actually writes and check they match these.
  * Not included: TCP/IP packet headers. */
 #ifndef QD_WIRE_COST_H
