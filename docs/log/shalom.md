@@ -49,3 +49,6 @@ verify                 median   0.0211 ms   p10   0.0209   p90   0.0229
 tampered readings rejected: 1000 of 1000
 signatures rejected under a different real key: 1000 of 1000
 ```
+
+## 2026-11-12
+Added `make measure`, which runs every timing and byte measurement three times in one sitting and writes a summary with charts to docs/results/results-wsl.md; it measured over the real encrypted connection by merging Carvin's PR #5 into a test copy, since that PR is not merged yet. All 1,642 connections sent and received exactly the bytes computed from PROTOCOL.md, so the Progress Report 2 byte counts are now confirmed on a real socket. Because the client opens a new connection per file, each file also pays a 1,099-byte handshake, so one reading per file costs 4,608 bytes sent per 38.9-byte reading (3,509 without the handshake), and 100 per file costs 85. Medians in WSL on the i5-1155G7: connect plus handshake 0.22 ms, upload 1 MiB 3.9 ms and 10 MiB 26.9 ms, sensor CPU 125 µs per reading at one per file and 3.4 µs at 100 per file, peak memory about 5.5 MiB; medians moved up to about 30% between the three runs, and a first run without a warm-up showed ML-KEM about twice as slow, so the script now warms up first. Also added scripts/demo.sh (sensor upload, list, download, tamper, rejection) and scripts/sensor_upload.sh; both run end to end.
