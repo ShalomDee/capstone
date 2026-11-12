@@ -10,8 +10,12 @@
 #include "wire_cost.h"
 
 #include <oqs/oqs.h>
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -263,8 +267,354 @@ static void test_wire_cost(void)
     CHECK(wire_register_c2s(10) == 22 + 1 + 10 + 2 + 1952);
 }
 
-int main(void)
+typedef struct {
+    int fd;
+    int handshake_rc;
+    int recv_rc;
+    int send_rc;
+    int message_ok;
+    uint8_t send_key[QD_AES_KEY_BYTES];
+    uint8_t recv_key[QD_AES_KEY_BYTES];
+} secure_peer;
+
+static void *secure_peer_round_trip(void *arg)
 {
+    secure_peer *peer = arg;
+    sec_session s = { .fd = peer->fd };
+    peer->handshake_rc = sec_handshake_server(peer->fd, &s);
+    if (peer->handshake_rc == QD_OK) {
+        memcpy(peer->send_key, s.send_key, sizeof peer->send_key);
+        memcpy(peer->recv_key, s.recv_key, sizeof peer->recv_key);
+        uint8_t type = 0, body[3] = {0};
+        size_t len = 0;
+        peer->recv_rc = sec_recv(&s, &type, body, sizeof body, &len);
+        peer->message_ok = peer->recv_rc == QD_OK && type == 0x55 &&
+            len == 3 && memcmp(body, "hey", 3) == 0;
+        peer->send_rc = sec_send(&s, 0x56, (const uint8_t *)"yes", 3);
+    }
+    sec_close(&s);
+    return NULL;
+}
+
+static void test_secure_handshake_and_messages(void)
+{
+    int sv[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    secure_peer peer = { .fd = sv[1] };
+    pthread_t thread;
+    int thread_rc = pthread_create(&thread, NULL, secure_peer_round_trip, &peer);
+    CHECK(thread_rc == 0);
+    if (thread_rc != 0) {
+        close(sv[0]);
+        close(sv[1]);
+        return;
+    }
+
+    sec_session client = { .fd = sv[0] };
+    int rc = sec_handshake_client(sv[0], &client);
+    CHECK(rc == QD_OK);
+    if (rc == QD_OK) {
+        uint8_t type = 0, body[3] = {0};
+        size_t len = 0;
+        CHECK(sec_send(&client, 0x55, (const uint8_t *)"hey", 3) == QD_OK);
+        CHECK(sec_recv(&client, &type, body, sizeof body, &len) == QD_OK);
+        CHECK(type == 0x56 && len == 3 && memcmp(body, "yes", 3) == 0);
+    } else {
+        shutdown(sv[0], SHUT_RDWR);
+    }
+
+    CHECK(pthread_join(thread, NULL) == 0);
+    CHECK(peer.handshake_rc == QD_OK);
+    CHECK(peer.recv_rc == QD_OK && peer.message_ok);
+    CHECK(peer.send_rc == QD_OK);
+    if (rc == QD_OK && peer.handshake_rc == QD_OK) {
+        CHECK(memcmp(client.send_key, peer.recv_key, QD_AES_KEY_BYTES) == 0);
+        CHECK(memcmp(client.recv_key, peer.send_key, QD_AES_KEY_BYTES) == 0);
+    }
+    sec_close(&client);
+}
+
+typedef struct {
+    int fd;
+    int handshake_rc;
+    sec_session session;
+} secure_session_peer;
+
+static void *secure_peer_keep_session(void *arg)
+{
+    secure_session_peer *peer = arg;
+    peer->session.fd = peer->fd;
+    peer->handshake_rc = sec_handshake_server(peer->fd, &peer->session);
+    return NULL;
+}
+
+static void test_secure_rejects_modified_ciphertext(void)
+{
+    int handshake_fds[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, handshake_fds);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    secure_session_peer peer = { .fd = handshake_fds[1], .session = { .fd = -1 } };
+    pthread_t thread;
+    int thread_rc = pthread_create(&thread, NULL, secure_peer_keep_session, &peer);
+    CHECK(thread_rc == 0);
+    if (thread_rc != 0) {
+        close(handshake_fds[0]);
+        close(handshake_fds[1]);
+        return;
+    }
+
+    sec_session client = { .fd = handshake_fds[0] };
+    int client_rc = sec_handshake_client(client.fd, &client);
+    CHECK(client_rc == QD_OK);
+    if (client_rc != QD_OK) shutdown(client.fd, SHUT_RDWR);
+    CHECK(pthread_join(thread, NULL) == 0);
+    CHECK(peer.handshake_rc == QD_OK);
+    if (client_rc != QD_OK || peer.handshake_rc != QD_OK) {
+        sec_close(&client);
+        sec_close(&peer.session);
+        return;
+    }
+
+    CHECK(memcmp(client.send_key, peer.session.recv_key, QD_AES_KEY_BYTES) == 0);
+    CHECK(memcmp(client.recv_key, peer.session.send_key, QD_AES_KEY_BYTES) == 0);
+
+    int client_route[2] = {-1, -1}, server_route[2] = {-1, -1};
+    int client_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, client_route);
+    int server_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, server_route);
+    CHECK(client_pair_rc == 0 && server_pair_rc == 0);
+    if (client_pair_rc != 0 || server_pair_rc != 0) {
+        if (client_pair_rc == 0) {
+            close(client_route[0]);
+            close(client_route[1]);
+        }
+        if (server_pair_rc == 0) {
+            close(server_route[0]);
+            close(server_route[1]);
+        }
+        sec_close(&client);
+        sec_close(&peer.session);
+        return;
+    }
+
+    close(client.fd);
+    close(peer.session.fd);
+    client.fd = client_route[0];
+    peer.session.fd = server_route[1];
+
+    int send_rc = sec_send(&client, 0x57, (const uint8_t *)"tamper", 6);
+    CHECK(send_rc == QD_OK);
+    if (send_rc == QD_OK) {
+        uint8_t frame_type = 0;
+        size_t frame_len = 0;
+        int rc = frame_read(client_route[1], &frame_type, buf, sizeof buf, &frame_len);
+        CHECK(rc == QD_OK && frame_type == QD_F_SECURE);
+        if (rc == QD_OK && frame_type == QD_F_SECURE &&
+            frame_len > QD_GCM_TAG_BYTES) {
+            buf[0] ^= 0x01;
+            int relay_rc = frame_write(server_route[0], frame_type, buf, frame_len);
+            CHECK(relay_rc == QD_OK);
+            if (relay_rc == QD_OK) {
+                uint8_t type = 0, body[16];
+                size_t len = 0;
+                CHECK(sec_recv(&peer.session, &type, body, sizeof body, &len) == QD_ERR_CRYPTO);
+            }
+        } else {
+            CHECK(0 && "could not relay ciphertext for tamper test");
+        }
+    } else {
+        CHECK(0 && "could not send ciphertext for tamper test");
+    }
+
+    sec_close(&client);
+    sec_close(&peer.session);
+    close(client_route[1]);
+    close(server_route[0]);
+}
+
+static void *secure_peer_handshake_only(void *arg)
+{
+    secure_peer *peer = arg;
+    sec_session s = { .fd = peer->fd };
+    peer->handshake_rc = sec_handshake_server(peer->fd, &s);
+    sec_close(&s);
+    return NULL;
+}
+
+typedef struct {
+    int listen_fd;
+    int handshake_rc;
+} tcp_handshake_peer;
+
+static void *tcp_handshake_server(void *arg)
+{
+    tcp_handshake_peer *peer = arg;
+    int fd = net_accept(peer->listen_fd);
+    close(peer->listen_fd);
+    if (fd < 0) {
+        peer->handshake_rc = fd;
+        return NULL;
+    }
+
+    sec_session s = { .fd = fd };
+    peer->handshake_rc = sec_handshake_server(fd, &s);
+    sec_close(&s);
+    return NULL;
+}
+
+static void test_handshake_bad_version(void)
+{
+    int sv[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    secure_peer peer = { .fd = sv[1] };
+    pthread_t thread;
+    int thread_rc = pthread_create(&thread, NULL, secure_peer_handshake_only, &peer);
+    CHECK(thread_rc == 0);
+    if (thread_rc != 0) {
+        close(sv[0]);
+        close(sv[1]);
+        return;
+    }
+
+    uint8_t wrong_version = QD_PROTOCOL_VERSION + 1;
+    CHECK(frame_write(sv[0], QD_F_HELLO, &wrong_version, 1) == QD_OK);
+    uint8_t type = 0, body[1] = {0};
+    size_t len = 0;
+    CHECK(frame_read(sv[0], &type, body, sizeof body, &len) == QD_OK);
+    CHECK(QD_E_BAD_VERSION == 0x09);
+    CHECK(type == QD_F_ERROR && len == 1 && body[0] == 0x09);
+
+    CHECK(pthread_join(thread, NULL) == 0);
+    CHECK(peer.handshake_rc == QD_ERR_FORMAT);
+    close(sv[0]);
+}
+
+static int compare_u64(const void *a, const void *b)
+{
+    uint64_t left = *(const uint64_t *)a;
+    uint64_t right = *(const uint64_t *)b;
+    return (left > right) - (left < right);
+}
+
+static int measure_handshakes(size_t runs)
+{
+    uint64_t *samples = calloc(runs, sizeof *samples);
+    if (!samples) return 1;
+
+    for (size_t i = 0; i < runs; i++) {
+        int listen_fd = net_listen(0);
+        if (listen_fd < 0) {
+            fprintf(stderr, "net_listen: %s\n", qd_strerror(listen_fd));
+            free(samples);
+            return 1;
+        }
+
+        struct sockaddr_storage address;
+        socklen_t address_len = sizeof address;
+        if (getsockname(listen_fd, (struct sockaddr *)&address, &address_len) != 0) {
+            perror("getsockname");
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+        char host[INET6_ADDRSTRLEN];
+        int port;
+        if (address.ss_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&address;
+            strcpy(host, "127.0.0.1");
+            port = ntohs(addr->sin_port);
+        } else if (address.ss_family == AF_INET6) {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&address;
+            strcpy(host, "::1");
+            port = ntohs(addr->sin6_port);
+        } else {
+            fprintf(stderr, "unexpected listener address family\n");
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        int client_fd = net_connect(host, port);
+        if (client_fd < 0) {
+            fprintf(stderr, "net_connect: %s\n", qd_strerror(client_fd));
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        tcp_handshake_peer peer = { .listen_fd = listen_fd };
+        pthread_t thread;
+        int thread_rc = pthread_create(&thread, NULL, tcp_handshake_server, &peer);
+        if (thread_rc != 0) {
+            fprintf(stderr, "pthread_create: %s\n", strerror(thread_rc));
+            close(client_fd);
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        sec_session client = { .fd = client_fd };
+        uint64_t start = bench_now_ns();
+        int rc = sec_handshake_client(client_fd, &client);
+        uint64_t end = bench_now_ns();
+        int join_rc = pthread_join(thread, NULL);
+        sec_close(&client);
+        if (rc != QD_OK || join_rc != 0 || peer.handshake_rc != QD_OK) {
+            fprintf(stderr, "handshake measurement failed: client=%s, server=%s\n",
+                    qd_strerror(rc), qd_strerror(peer.handshake_rc));
+            free(samples);
+            return 1;
+        }
+        samples[i] = end - start;
+    }
+
+    qsort(samples, runs, sizeof *samples, compare_u64);
+    uint64_t median = runs % 2
+        ? samples[runs / 2]
+        : samples[runs / 2 - 1] + (samples[runs / 2] - samples[runs / 2 - 1]) / 2;
+    bench_log("handshake_runs", runs, "runs");
+    bench_log("handshake_median", median, "ns");
+    bench_log("handshake_c2s_bytes", wire_handshake_c2s(), "B");
+    bench_log("handshake_s2c_bytes", wire_handshake_s2c(), "B");
+    bench_log("handshake_total_bytes",
+              wire_handshake_c2s() + wire_handshake_s2c(), "B");
+    free(samples);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc >= 2 && strcmp(argv[1], "--measure-handshake") == 0) {
+        size_t runs = 1000;
+        if (argc > 3) {
+            fprintf(stderr, "usage: %s [--measure-handshake [runs]]\n", argv[0]);
+            return 2;
+        }
+        if (argc == 3) {
+            char *end = NULL;
+            errno = 0;
+            unsigned long value = strtoul(argv[2], &end, 10);
+            if (errno || end == argv[2] || *end || value == 0 ||
+                value > 100000 || value > SIZE_MAX) {
+                fprintf(stderr, "runs must be between 1 and 100000\n");
+                return 2;
+            }
+            runs = (size_t)value;
+        }
+        return measure_handshakes(runs);
+    }
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [--measure-handshake [runs]]\n", argv[0]);
+        return 2;
+    }
+
     test_byte_order();
     test_frame_round_trip();
     test_frame_rejects_bad_headers();
@@ -276,6 +626,9 @@ int main(void)
     test_reading_filenames();
     test_reading_file();
     test_wire_cost();
+    test_secure_handshake_and_messages();
+    test_secure_rejects_modified_ciphertext();
+    test_handshake_bad_version();
 
     printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
