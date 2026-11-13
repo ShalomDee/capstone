@@ -16,7 +16,7 @@ The exact message format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Status
 
-As of Nov 12, 2026, all three parts are merged: the secure pipe (Carvin, `common/securenet.c`, pull request #5), signing, file checks and the client and server commands (Chris), and the sensor simulator and measurements (Shalom). `make test` passes 822 checks, and the full flow works end to end (`./scripts/demo.sh`). The results of record are [docs/results/results-codespaces.md](docs/results/results-codespaces.md): `make measure` on the merged code (commit `c3b14d0`) in GitHub Codespaces, the same machine type the team used for its other measurements. [docs/results/results-wsl.md](docs/results/results-wsl.md) is an earlier run on a laptop (WSL), taken before the merge with an earlier version of the secure pipe in a test copy; keep it only for comparison.
+As of Nov 12, 2026, all three parts are merged: the secure pipe (Carvin, `common/securenet.c`, pull request #5), signing, file checks and the client and server commands (Chris), and the sensor simulator and measurements (Shalom). `make test` passes 822 checks, and the full flow works end to end (`./scripts/demo.sh`). The results of record are [docs/results/results-codespaces.md](docs/results/results-codespaces.md): `make measure` on the merged code (commit `c3b14d0`) in GitHub Codespaces, the same machine type the team used for its other measurements. An earlier laptop (WSL) run, taken before the merge with an earlier version of the secure pipe, was removed; it is in git history at commit `d4bf763`.
 
 ## Build and run
 
@@ -40,7 +40,7 @@ DEMO_FAST=1 ./scripts/demo.sh   # same, without pauses
 ./scripts/sensor_upload.sh field-a-01 30 10   # sensor makes signed files and uploads them (server must be running)
 ```
 
-`make measure` writes raw output to `bench/results/` (not committed) and the summary to `docs/results/results-<env>.md` (`-codespaces`, `-wsl` or `-docker`), with charts in `docs/results/figures/`. Run it plugged in with other apps closed.
+`make measure` writes raw output to `bench/results/` (not committed) and the summary to `docs/results/results-<env>.md` (`codespaces`, `wsl` or `docker`, depending on where it runs), with charts in `docs/results/figures/`. Run it plugged in with other apps closed.
 
 Programs (in `build/`):
 
