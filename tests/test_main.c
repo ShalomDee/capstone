@@ -11,10 +11,15 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+#include <arpa/inet.h>
+#include <errno.h>
 #include <oqs/oqs.h>
+#include <pthread.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int failures, checks;
@@ -491,8 +496,331 @@ cleanup:
     CHECK(rmdir(dir) == 0); /* also catches leaked staging/backup directories */
 }
 
-int main(void)
+static void test_secure_handshake_and_messages(void)
 {
+    int sv[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
+        close(sv[0]);
+        close(sv[1]);
+        return;
+    }
+    if (pid == 0) {
+        close(sv[0]);
+        sec_session server = { .fd = sv[1] };
+        int rc = sec_handshake_server(sv[1], &server);
+        uint8_t type = 0, body[3] = {0};
+        size_t len = 0;
+        if (rc == QD_OK)
+            rc = sec_recv(&server, &type, body, sizeof body, &len);
+        int valid = rc == QD_OK && type == 0x55 && len == 3 &&
+            memcmp(body, "hey", 3) == 0;
+        if (valid)
+            rc = sec_send(&server, 0x56, (const uint8_t *)"yes", 3);
+        sec_close(&server);
+        _exit(valid && rc == QD_OK ? 0 : 1);
+    }
+    close(sv[1]);
+
+    sec_session client = { .fd = sv[0] };
+    int rc = sec_handshake_client(sv[0], &client);
+    CHECK(rc == QD_OK);
+    if (rc == QD_OK) {
+        uint8_t type = 0, body[3] = {0};
+        size_t len = 0;
+        CHECK(sec_send(&client, 0x55, (const uint8_t *)"hey", 3) == QD_OK);
+        CHECK(sec_recv(&client, &type, body, sizeof body, &len) == QD_OK);
+        CHECK(type == 0x56 && len == 3 && memcmp(body, "yes", 3) == 0);
+    }
+    sec_close(&client);
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+static void test_secure_rejects_modified_ciphertext(void)
+{
+    int handshake_fds[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, handshake_fds);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    int client_route[2] = {-1, -1}, server_route[2] = {-1, -1};
+    int client_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, client_route);
+    int server_pair_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, server_route);
+    CHECK(client_pair_rc == 0 && server_pair_rc == 0);
+    if (client_pair_rc != 0 || server_pair_rc != 0) {
+        close(handshake_fds[0]);
+        close(handshake_fds[1]);
+        if (client_pair_rc == 0) {
+            close(client_route[0]);
+            close(client_route[1]);
+        }
+        if (server_pair_rc == 0) {
+            close(server_route[0]);
+            close(server_route[1]);
+        }
+        return;
+    }
+
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
+        close(handshake_fds[0]);
+        close(handshake_fds[1]);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        close(server_route[1]);
+        return;
+    }
+    if (pid == 0) {
+        close(handshake_fds[0]);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        sec_session server = { .fd = handshake_fds[1] };
+        int rc = sec_handshake_server(handshake_fds[1], &server);
+        close(handshake_fds[1]);
+        server.fd = server_route[1];
+        if (rc == QD_OK) {
+            uint8_t type = 0, body[16];
+            size_t len = 0;
+            rc = sec_recv(&server, &type, body, sizeof body, &len);
+            sec_close(&server);
+            _exit(rc == QD_ERR_CRYPTO ? 0 : 1);
+        }
+        sec_close(&server);
+        _exit(1);
+    }
+
+    close(handshake_fds[1]);
+    close(server_route[1]);
+    sec_session client = { .fd = handshake_fds[0] };
+    int client_rc = sec_handshake_client(client.fd, &client);
+    CHECK(client_rc == QD_OK);
+    if (client_rc != QD_OK) {
+        sec_close(&client);
+        close(client_route[0]);
+        close(client_route[1]);
+        close(server_route[0]);
+        int status = 0;
+        CHECK(waitpid(pid, &status, 0) == pid);
+        CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        return;
+    }
+    close(client.fd);
+    client.fd = client_route[0];
+
+    int send_rc = sec_send(&client, 0x57, (const uint8_t *)"tamper", 6);
+    CHECK(send_rc == QD_OK);
+    if (send_rc == QD_OK) {
+        uint8_t frame_type = 0;
+        size_t frame_len = 0;
+        int rc = frame_read(client_route[1], &frame_type, buf, sizeof buf, &frame_len);
+        CHECK(rc == QD_OK && frame_type == QD_F_SECURE);
+        if (rc == QD_OK && frame_type == QD_F_SECURE &&
+            frame_len > QD_GCM_TAG_BYTES) {
+            buf[0] ^= 0x01;
+            int relay_rc = frame_write(server_route[0], frame_type, buf, frame_len);
+            CHECK(relay_rc == QD_OK);
+        } else {
+            CHECK(0 && "could not relay ciphertext for tamper test");
+        }
+    } else {
+        CHECK(0 && "could not send ciphertext for tamper test");
+    }
+
+    sec_close(&client);
+    close(client_route[1]);
+    close(server_route[0]);
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+typedef struct {
+    int listen_fd;
+    int handshake_rc;
+} tcp_handshake_peer;
+
+static void *tcp_handshake_server(void *arg)
+{
+    tcp_handshake_peer *peer = arg;
+    int fd = net_accept(peer->listen_fd);
+    close(peer->listen_fd);
+    if (fd < 0) {
+        peer->handshake_rc = fd;
+        return NULL;
+    }
+
+    sec_session s = { .fd = fd };
+    peer->handshake_rc = sec_handshake_server(fd, &s);
+    sec_close(&s);
+    return NULL;
+}
+
+static void test_handshake_bad_version(void)
+{
+    int sv[2];
+    int socket_rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    CHECK(socket_rc == 0);
+    if (socket_rc != 0) return;
+
+    pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid < 0) {
+        close(sv[0]);
+        close(sv[1]);
+        return;
+    }
+    if (pid == 0) {
+        close(sv[0]);
+        sec_session server = { .fd = sv[1] };
+        int rc = sec_handshake_server(sv[1], &server);
+        sec_close(&server);
+        _exit(rc == QD_ERR_FORMAT ? 0 : 1);
+    }
+    close(sv[1]);
+
+    uint8_t wrong_version = QD_PROTOCOL_VERSION + 1;
+    CHECK(frame_write(sv[0], QD_F_HELLO, &wrong_version, 1) == QD_OK);
+    uint8_t type = 0, body[1] = {0};
+    size_t len = 0;
+    CHECK(frame_read(sv[0], &type, body, sizeof body, &len) == QD_OK);
+    CHECK(QD_E_BAD_VERSION == 0x09);
+    CHECK(type == QD_F_ERROR && len == 1 && body[0] == 0x09);
+
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    close(sv[0]);
+}
+
+static int compare_u64(const void *a, const void *b)
+{
+    uint64_t left = *(const uint64_t *)a;
+    uint64_t right = *(const uint64_t *)b;
+    return (left > right) - (left < right);
+}
+
+static int measure_handshakes(size_t runs)
+{
+    uint64_t *samples = calloc(runs, sizeof *samples);
+    if (!samples) return 1;
+
+    for (size_t i = 0; i < runs; i++) {
+        int listen_fd = net_listen(0);
+        if (listen_fd < 0) {
+            fprintf(stderr, "net_listen: %s\n", qd_strerror(listen_fd));
+            free(samples);
+            return 1;
+        }
+
+        struct sockaddr_storage address;
+        socklen_t address_len = sizeof address;
+        if (getsockname(listen_fd, (struct sockaddr *)&address, &address_len) != 0) {
+            perror("getsockname");
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+        char host[INET6_ADDRSTRLEN];
+        int port;
+        if (address.ss_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&address;
+            strcpy(host, "127.0.0.1");
+            port = ntohs(addr->sin_port);
+        } else if (address.ss_family == AF_INET6) {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&address;
+            strcpy(host, "::1");
+            port = ntohs(addr->sin6_port);
+        } else {
+            fprintf(stderr, "unexpected listener address family\n");
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        int client_fd = net_connect(host, port);
+        if (client_fd < 0) {
+            fprintf(stderr, "net_connect: %s\n", qd_strerror(client_fd));
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        tcp_handshake_peer peer = { .listen_fd = listen_fd };
+        pthread_t thread;
+        int thread_rc = pthread_create(&thread, NULL, tcp_handshake_server, &peer);
+        if (thread_rc != 0) {
+            fprintf(stderr, "pthread_create: %s\n", strerror(thread_rc));
+            close(client_fd);
+            close(listen_fd);
+            free(samples);
+            return 1;
+        }
+
+        sec_session client = { .fd = client_fd };
+        uint64_t start = bench_now_ns();
+        int rc = sec_handshake_client(client_fd, &client);
+        uint64_t end = bench_now_ns();
+        int join_rc = pthread_join(thread, NULL);
+        sec_close(&client);
+        if (rc != QD_OK || join_rc != 0 || peer.handshake_rc != QD_OK) {
+            fprintf(stderr, "handshake measurement failed: client=%s, server=%s\n",
+                    qd_strerror(rc), qd_strerror(peer.handshake_rc));
+            free(samples);
+            return 1;
+        }
+        samples[i] = end - start;
+    }
+
+    qsort(samples, runs, sizeof *samples, compare_u64);
+    uint64_t median = runs % 2
+        ? samples[runs / 2]
+        : samples[runs / 2 - 1] + (samples[runs / 2] - samples[runs / 2 - 1]) / 2;
+    bench_log("handshake_runs", runs, "runs");
+    bench_log("handshake_median", median, "ns");
+    bench_log("handshake_c2s_bytes", wire_handshake_c2s(), "B");
+    bench_log("handshake_s2c_bytes", wire_handshake_s2c(), "B");
+    bench_log("handshake_total_bytes",
+              wire_handshake_c2s() + wire_handshake_s2c(), "B");
+    free(samples);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc >= 2 && strcmp(argv[1], "--measure-handshake") == 0) {
+        size_t runs = 1000;
+        if (argc > 3) {
+            fprintf(stderr, "usage: %s [--measure-handshake [runs]]\n", argv[0]);
+            return 2;
+        }
+        if (argc == 3) {
+            char *end = NULL;
+            errno = 0;
+            unsigned long value = strtoul(argv[2], &end, 10);
+            if (errno || end == argv[2] || *end || value == 0 ||
+                value > 100000 || value > SIZE_MAX) {
+                fprintf(stderr, "runs must be between 1 and 100000\n");
+                return 2;
+            }
+            runs = (size_t)value;
+        }
+        return measure_handshakes(runs);
+    }
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [--measure-handshake [runs]]\n", argv[0]);
+        return 2;
+    }
+
     test_byte_order();
     test_frame_round_trip();
     test_frame_rejects_bad_headers();
@@ -504,6 +832,9 @@ int main(void)
     test_reading_filenames();
     test_reading_file();
     test_wire_cost();
+    test_secure_handshake_and_messages();
+    test_secure_rejects_modified_ciphertext();
+    test_handshake_bad_version();
     test_upload_replacement_and_single_error();
 
     printf("%d checks, %d failed\n", checks, failures);
