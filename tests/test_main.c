@@ -592,8 +592,10 @@ static void test_secure_rejects_modified_ciphertext(void)
             uint8_t type = 0, body[16];
             size_t len = 0;
             rc = sec_recv(&server, &type, body, sizeof body, &len);
+            /* a bad tag must also close the connection (PROTOCOL.md 5) */
+            int closed = server.fd == -1;
             sec_close(&server);
-            _exit(rc == QD_ERR_CRYPTO ? 0 : 1);
+            _exit(rc == QD_ERR_CRYPTO && closed ? 0 : 1);
         }
         sec_close(&server);
         _exit(1);

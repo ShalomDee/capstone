@@ -16,3 +16,6 @@ bench/results/
 
 # Files written by the sensor simulator
 sensor-data/
+
+# Paper drafts and course submissions: kept local, not part of the code
+docs/paper/

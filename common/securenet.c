@@ -1,3 +1,36 @@
+/*
+ * securenet.c: QuantumDrive secure pipe (docs/PROTOCOL.md v1, sections 2-5)
+ *
+ * Stack: liboqs ML-KEM-768 for the handshake, OpenSSL for SHA-256,
+ * HKDF-SHA256 and AES-256-GCM.
+ *
+ * Frame:      length (4, BE) | type (1) | payload (length - 1)
+ *             1 <= length <= 131,072; anything else is an error and the
+ *             connection is closed without reading on.
+ *
+ * Handshake:  1. C -> S  HELLO          [0x01]
+ *             2. S -> C  KEM_PUBKEY     pk (1184), fresh per connection
+ *             3. C -> S  KEM_CIPHERTEXT ct (1088)
+ *             Bad version: server sends ERROR [0x09] unencrypted, then closes.
+ *             Any other handshake problem: close with no reply.
+ *
+ * Keys:       th      = SHA-256(pk || ct)
+ *             key_c2s = HKDF-SHA256(ss, salt = th, info = "quantumdrive v1 c2s", 32)
+ *             key_s2c = HKDF-SHA256(ss, salt = th, info = "quantumdrive v1 s2c", 32)
+ *
+ * SECURE:     payload = AES-256-GCM(app type (1) | body) || tag (16), no AAD
+ *             nonce   = 00 00 00 00 | 8-byte BE counter, one counter per direction
+ *             Tag failure or counter overflow closes the connection.
+ *
+ * Connection closing:
+ *   - Tag failure or counter overflow: this file closes the socket itself
+ *     and sets s->fd = -1, so a later sec_close() is still safe.
+ *   - Failed handshake (including bad version): the function returns an
+ *     error and the caller must call sec_close(), which closes the socket.
+ *     The caller must not close the fd itself as well.
+ *
+ * Link with: -loqs -lcrypto
+ */
 #include "securenet.h"
 #include "framing.h"
 #include "protocol.h"
@@ -265,6 +298,15 @@ done:
     return rc;
 }
 
+/* PROTOCOL.md section 5: after a tag failure or counter overflow the
+ * connection can't be trusted, so close it here instead of relying on
+ * every caller. Keys are wiped later by sec_close(). */
+static void drop_connection(sec_session *s)
+{
+    if (s->fd >= 0) close(s->fd);
+    s->fd = -1;
+}
+
 static void make_nonce(uint64_t counter, uint8_t nonce[QD_GCM_NONCE_BYTES])
 {
     memset(nonce, 0, 4);
@@ -275,7 +317,10 @@ int sec_send(sec_session *s, uint8_t type, const uint8_t *body, size_t len)
 {
     if (!s || s->fd < 0 || (len && !body)) return QD_ERR_ARG;
     if (len > QD_BODY_MAX) return QD_ERR_TOO_LARGE;
-    if (s->send_ctr == UINT64_MAX) return QD_ERR_CRYPTO;
+    if (s->send_ctr == UINT64_MAX) {
+        drop_connection(s);
+        return QD_ERR_CRYPTO;
+    }
 
     size_t plain_len = len + 1;
     size_t frame_len = plain_len + QD_GCM_TAG_BYTES;
@@ -318,7 +363,10 @@ int sec_send(sec_session *s, uint8_t type, const uint8_t *body, size_t len)
 int sec_recv(sec_session *s, uint8_t *type, uint8_t *buf, size_t cap, size_t *len)
 {
     if (!s || s->fd < 0 || !type || !len || (cap && !buf)) return QD_ERR_ARG;
-    if (s->recv_ctr == UINT64_MAX) return QD_ERR_CRYPTO;
+    if (s->recv_ctr == UINT64_MAX) {
+        drop_connection(s);
+        return QD_ERR_CRYPTO;
+    }
 
     uint8_t encrypted[QD_FRAME_MAX - 1];
     uint8_t frame_type;
@@ -353,6 +401,7 @@ int sec_recv(sec_session *s, uint8_t *type, uint8_t *buf, size_t cap, size_t *le
     if (!ok) {
         OPENSSL_cleanse(plain, plain_len);
         free(plain);
+        drop_connection(s);
         return QD_ERR_CRYPTO;
     }
 
