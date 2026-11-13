@@ -16,7 +16,7 @@ The exact message format is in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Status
 
-As of Nov 12, 2026: signing, file checks and the client and server commands (Chris) are merged, and `make test` passes 797 checks. The secure pipe (Carvin, `common/securenet.c`) is in pull request #5 and not merged yet; until it is, `main` has the stub and the server cannot accept connections. With PR #5 merged in a test copy, the full flow works end to end and every measurement below was taken.
+As of Nov 12, 2026, all three parts are merged: the secure pipe (Carvin, `common/securenet.c`, pull request #5), signing, file checks and the client and server commands (Chris), and the sensor simulator and measurements (Shalom). `make test` passes 822 checks, and the full flow works end to end (`./scripts/demo.sh`). The WSL results in [docs/results/results-wsl.md](docs/results/results-wsl.md) were taken before the merge, with an earlier version of the secure pipe in a test copy; they are to be re-run on the merged code.
 
 ## Build and run
 
