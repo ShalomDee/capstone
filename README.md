@@ -67,9 +67,7 @@ bench/       measurement programs and chart scripts
 tests/       make test
 demo/        toolchain check
 docs/        protocol, setup guides, reports, work log
-ai/          rules for AI assistants (start at AGENTS.md)
-team/        guides for teammates (start at team/README.md)
-scripts/     helper scripts, git hooks
+scripts/     helper scripts
 ```
 
 ## Team
@@ -82,12 +80,9 @@ scripts/     helper scripts, git hooks
 
 ## Contributing
 
-- Teammates: read [team/README.md](team/README.md) first.
 - Work on your own branch (`carvin/secure-pipe`, `chris/identity`, `shalom/sensor`) and open a pull request to `main`. Shalom reviews and merges.
 - Run `make test` before pushing.
 - Never commit keys or generated data.
-- No AI attribution lines in commits. The hook in `scripts/hooks/` removes them; the dev container enables it automatically. In an existing clone, run `git config core.hooksPath scripts/hooks` once.
-- AI assistants: read [AGENTS.md](AGENTS.md).
 
 ## Limitations
 

@@ -1,5 +1,5 @@
 /* Timing and logging helpers for measurements. Owner: Shalom.
- * The function list is the shared contract (CLAUDE.md section 8). */
+ * The function list is the shared contract. */
 #ifndef QD_BENCH_H
 #define QD_BENCH_H
 

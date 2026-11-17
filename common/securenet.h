@@ -1,5 +1,5 @@
 /* The secure pipe: TCP connection, ML-KEM-768 handshake, AES-256-GCM messages.
- * Owner: Carvin. The function list is the shared contract (CLAUDE.md section 8);
+ * Owner: Carvin. The function list is the shared contract;
  * do not change it without Shalom's approval. Byte layouts: docs/PROTOCOL.md. */
 #ifndef QD_SECURENET_H
 #define QD_SECURENET_H

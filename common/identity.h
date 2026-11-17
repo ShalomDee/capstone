@@ -1,6 +1,6 @@
 /* Proof of who sent what: ML-DSA-65 key pairs, signing, verifying, file hashes,
  * and the signed record. Owner: Chris. The function list is the shared contract
- * (CLAUDE.md section 8); do not change it without Shalom's approval.
+ * Do not change it without Shalom's approval.
  * Record layout: docs/PROTOCOL.md section 5.2. */
 #ifndef QD_IDENTITY_H
 #define QD_IDENTITY_H

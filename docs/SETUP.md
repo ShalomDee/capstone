@@ -62,11 +62,6 @@ Not yet tested on a Mac. Tell Shalom if anything fails.
    make test        # builds everything and runs our tests
    ```
    The last line should say `0 failed`.
-4. Run:
-   ```sh
-   git config core.hooksPath     # checks that the commit-message hook is switched on
-   ```
-   It should print `scripts/hooks`. If it prints nothing, run `git config core.hooksPath scripts/hooks`.
 
 If any of these fail, send Shalom a screenshot of the terminal.
 
@@ -152,5 +147,5 @@ This is a harmless first run of the whole process.
 | `git merge` says "CONFLICT" | Two people changed the same lines. Don't guess: run `git merge --abort` and message Shalom. |
 | `git commit` says "Please tell me who you are" | Do Part 1, option B, step 8. |
 | You committed to `main` by mistake | Don't push. Message Shalom. |
-| `make` shows an error | Read the **first** error line. Paste it into your AI chat or send it to Shalom. |
+| `make` shows an error | Read the **first** error line. Send it to Shalom. |
 | You accidentally committed a key file | Don't push. Message Shalom. |

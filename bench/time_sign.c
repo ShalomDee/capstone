@@ -1,5 +1,5 @@
 /* Times id_sign and id_verify many times and reports the median.
- * Cloud machines are noisy, so single runs are not results (CLAUDE.md section 5).
+ * Cloud machines are noisy, so single runs are not results.
  * Uses Chris's real ML-DSA-65 code with a fresh key pair in a temporary folder.
  * id_sign reads the private key file each call, so its time includes that file read.
  * Usage: time_sign [runs]        (default: 1000)
