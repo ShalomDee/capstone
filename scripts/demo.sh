@@ -51,7 +51,11 @@ step "6. Attacker changes one byte of the stored copy on the server"
 STORED=$(grep -l "$FILE" server-data/qd-*/meta | head -1)
 DATA=$(dirname "$STORED")/data
 echo "before: $(head -1 "$DATA")"
-printf '9' | dd of="$DATA" bs=1 seek=25 conv=notrunc status=none
+# Overwrite byte 25 (a digit of the timestamp) with a digit that differs from
+# the one already there, so the change is never a no-op.
+CUR=$(dd if="$DATA" bs=1 skip=25 count=1 status=none)
+NEW=9; [ "$CUR" = "9" ] && NEW=0
+printf '%s' "$NEW" | dd of="$DATA" bs=1 seek=25 conv=notrunc status=none
 echo "after:  $(head -1 "$DATA")"
 
 step "7. Download again: the hash no longer matches the signed record"
